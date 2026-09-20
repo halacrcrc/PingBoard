@@ -1,0 +1,24 @@
+# 依赖与构建产物
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Vite 配置加载临时文件
+vite.config.ts.timestamp-*.mjs
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+
+# 内部工作目录（不随源码发布）
+.workbuddy/
+qa-artifacts/
+交付包/
+qa-window.png
+
+# 日志
+*.log

@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全局基础样式 */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system,
+    sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+  color: #1e293b;
+  background-color: #f1f5f9;
+}
+
+.dark body {
+  color: #e2e8f0;
+  background-color: #0f172a;
+}
+
+/* 自定义滚动条，保证在浅色/深色下都清晰 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.45);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+
+/* 表格行禁用文本选中，避免多选时误选文字 */
+.pb-table-row {
+  user-select: none;
+}

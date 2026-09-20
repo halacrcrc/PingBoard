@@ -1,0 +1,47 @@
+[package]
+name = "pingboard"
+version = "1.0.0"
+description = "PingBoard — 多主机 Ping 监视器"
+authors = ["PingBoard"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "pingboard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+# 构建期修复（见文件末尾「传递依赖构建修复」说明）
+indexmap = { version = "1", features = ["std"] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_Networking_WinSock",
+] }
+# 传递依赖构建修复（见文件末尾说明）
+indexmap = { version = "1", features = ["std"] }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 传递依赖构建修复说明：
+#   tauri-utils / tauri-build -> schemars 0.8 -> indexmap 1.x
+#   indexmap 1.x 的 build.rs 通过 `autocfg::emit_sysroot_crate("std")` 探测标准库，
+#   在部分较新 rustc（本项目实测 1.98.1）下探测失败，导致其 `has_std` cfg 未设置，
+#   进而使 schemars 出现 `IndexMap<K, V>` 泛型参数数量不匹配的编译错误。
+#   显式启用 indexmap 的 `std` 特性会命中 build.rs 的 `CARGO_FEATURE_STD` 分支，
+#   直接 emit `has_std`，从而绕过探测。此处仅为修复该传递依赖问题，代码中未使用 indexmap。
+# ─────────────────────────────────────────────────────────────────────────────
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = false
+opt-level = 3
+
