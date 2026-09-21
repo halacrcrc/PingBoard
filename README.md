@@ -8,6 +8,66 @@
 
 ---
 
+## 系统要求
+
+| 项目 | 要求 |
+|---|---|
+| 操作系统 | **Windows 10**（建议 1809 及以上）或 **Windows 11**。Windows Server 2016 / 2019 / 2022 理论可用（未实测） |
+| 系统架构 | **仅 64 位（x64）**。32 位系统无法安装，暂无 ARM64 原生版本 |
+| 额外组件 | **仅需 Microsoft Edge WebView2 运行时**（Windows 11 已内置；Windows 10 多数已随 Edge 一起安装）。无需 VC++ 运行库、无需 .NET Framework、无需任何系统补丁 |
+| 权限 | 普通用户即可。安装到当前用户目录，运行与安装**均不触发 UAC** |
+| 磁盘占用 | 程序约 5.5 MB；WebView2 用户数据目录约 10 MB（随缓存缓慢增长） |
+| 网络 | 探测依赖 ICMP 回显（IPv4），需本机出站策略与目标主机放行 ping |
+
+> **不支持 Windows 7 / 8.1**：WebView2 运行时自 109 版起已停止支持这两个系统。
+>
+> **如何确认本机是否已装 WebView2**：打开「设置 → 应用 → 已安装的应用」搜索 `WebView2`；
+> 或查看目录 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\`（存在版本号子目录即已安装）。
+> 若缺失，可从微软官网安装 **Evergreen 运行时**：
+> <https://developer.microsoft.com/microsoft-edge/webview2/>
+
+### 为什么不需要 VC++ 运行库
+
+程序使用 Rust 编译，C 运行时（CRT）已**静态链接**进 `pingboard.exe`，导入表中不含
+`vcruntime140.dll` / `msvcp140.dll`；WebView2 的加载器（`WebView2Loader.dll`）同样已静态链接，
+因此安装目录下只有一个可执行文件，**不需要任何额外的可再发行组件**。
+
+---
+
+## 安装
+
+提供三种安装包，**程序功能完全相同**，区别只在于「如何为缺失 WebView2 的目标机提供运行时」。
+
+| 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
+|---|---|---|---|
+| `PingBoard_1.1.0_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.0_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.8 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.0_x64-setup-offline.exe`（**完整离线版**） | 217.8 MB（208 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
+
+> 三者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
+> - 在线引导版 = `downloadBootstrapper`：安装时若检测到缺少 WebView2，才去下载约 1.8 MB 的引导程序；
+> - 内置引导版 = `embedBootstrapper`：把引导程序预置在安装包里，离线环境也能「发起」安装，但仍需联网下载运行时本体；
+> - 完整离线版 = `offlineInstaller`：内置 213 MB（203 MiB）的 WebView2 离线安装程序，**全程无需联网**。
+>
+> 只要目标机已装 WebView2（Windows 11 默认如此），三种包装出来的结果**完全一致**，
+> 用最小的在线引导版即可。
+
+### 安装步骤
+
+1. 双击安装包，按向导完成（默认安装到 `%LOCALAPPDATA%\PingBoard`，当前用户，免 UAC）。
+2. 从开始菜单或桌面快捷方式启动。
+3. 卸载：通过「设置 → 应用」或安装目录下的 `uninstall.exe`。
+
+静默安装 / 卸载（供批量部署使用）：
+
+```bat
+PingBoard_1.1.0_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.0_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+uninstall.exe /S                                     :: 静默卸载
+```
+
+---
+
 ## 功能特性
 
 ### 探测引擎（两级策略）
@@ -117,8 +177,28 @@ npx tauri build --bundles nsis
 - 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.0_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
-安装方式：双击安装包，按向导完成即可（`installMode = currentUser`，**免 UAC**）。
-若目标机器缺少 WebView2，安装包会自动下载引导程序（`downloadBootstrapper`）。
+安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
+`installMode = currentUser`（**免 UAC**），三种 `webviewInstallMode` 的取舍如下。
+
+切换 WebView2 打包方式（改 `src-tauri/tauri.conf.json` 的 `bundle.windows.webviewInstallMode` 后重新执行上面的命令）：
+
+| `webviewInstallMode.type` | 产物体积 | 是否需要联网 | 说明 |
+|---|---|---|---|
+| `downloadBootstrapper`（默认） | ≈ 2.0 MB | 缺 WebView2 时需要 | 安装时才下载约 1.8 MB 引导程序 |
+| `embedBootstrapper` | ≈ 3.8 MB | 缺 WebView2 时需要 | 引导程序内置，安装包 +≈1.8 MB |
+| `offlineInstaller` | 217.8 MB | **不需要** | 内置 WebView2 离线安装程序（213 MB），**构建时需联网下载一次** |
+
+```jsonc
+// src-tauri/tauri.conf.json
+"bundle": {
+  "windows": {
+    "webviewInstallMode": { "type": "downloadBootstrapper" }  // 或 embedBootstrapper / offlineInstaller
+  }
+}
+```
+
+> `offlineInstaller` 首次构建会从微软下载
+> `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`（约 203 MB），耗时较长；缓存后再次构建会更快。
 
 ---
 
