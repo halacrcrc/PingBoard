@@ -50,12 +50,12 @@ interface Col {
 }
 
 const COLS: Col[] = [
-  // 选择列：无排序键，表头位置渲染全选复选框
-  { key: null, label: "", align: "center", className: "w-10" },
+  // 选择列：无排序键，表头位置渲染全选复选框（收窄以给数据列留出空间）
+  { key: null, label: "", align: "center", className: "w-8" },
   { key: "enabled", label: "启用", align: "center", className: "w-12" },
-  { key: "name", label: "备注名", align: "left", className: "min-w-[120px]" },
-  { key: "host", label: "主机名", align: "left", className: "min-w-[150px]" },
-  { key: "resolved_ip", label: "IP 地址", align: "left", className: "min-w-[130px]" },
+  { key: "name", label: "备注名", align: "left", className: "min-w-[100px]" },
+  { key: "host", label: "主机名", align: "left", className: "min-w-[124px]" },
+  { key: "resolved_ip", label: "IP 地址", align: "left", className: "min-w-[112px]" },
   { key: "status", label: "状态", align: "center", className: "w-20" },
   { key: "last_rtt_ms", label: "延迟(ms)", align: "right", className: "w-20" },
   { key: "avg_rtt_ms", label: "平均", align: "right", className: "w-20" },
@@ -132,14 +132,15 @@ const TargetTable: React.FC<TargetTableProps> = ({
 
   return (
     <div className="h-full overflow-auto">
-      <table className="w-full border-collapse text-[12px]">
+      {/* min-w 让列宽由内容决定：窗口过窄时横向滚动而非挤压列宽/折行表头 */}
+      <table className="w-full min-w-[960px] border-collapse text-[12px]">
         <thead className="sticky top-0 z-10">
           <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-600">
             {COLS.map((c, i) => (
               <th
                 key={i}
                 onClick={() => c.key && onSort(c.key)}
-                className={`px-2 py-1.5 font-medium text-slate-600 dark:text-slate-300 ${
+                className={`px-2 py-1.5 font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap ${
                   c.key ? "cursor-pointer select-none hover:bg-slate-200 dark:hover:bg-slate-700" : ""
                 } ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left"} ${
                   c.className ?? ""
