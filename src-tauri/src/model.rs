@@ -97,6 +97,13 @@ pub struct PingSettings {
     pub payload_size: u16,
     pub ttl: u8,
     pub max_threads: usize,
+    /// 是否启用 max_threads 并发上限（关闭后不再按该值拦截，仅保留 4096 硬保护）
+    ///
+    /// ⚠️ 字段级 `#[serde(default = "default_true")]` 为硬性要求：
+    /// v1.0.0 的旧配置文件不含该字段，缺省时必须为 `true`，否则整份配置会回落默认、
+    /// 丢失用户已保存的主机列表。
+    #[serde(default = "default_true")]
+    pub limit_max_threads: bool,
     pub beep_on_fail: bool,
     pub auto_start: bool,
     pub history_len: usize,
@@ -110,11 +117,17 @@ impl Default for PingSettings {
             payload_size: 32,
             ttl: 128,
             max_threads: 256,
+            limit_max_threads: true,
             beep_on_fail: false,
             auto_start: false,
             history_len: 60,
         }
     }
+}
+
+/// `limit_max_threads` 的缺省值（true）：保证旧配置加载后仍默认启用并发上限
+fn default_true() -> bool {
+    true
 }
 
 /// 聚合快照：既作为 ping-snapshot 事件的 payload，也作为 get_state 的返回值
@@ -189,6 +202,7 @@ mod tests {
             payload_size: 56,
             ttl: 64,
             max_threads: 32,
+            limit_max_threads: false,
             beep_on_fail: true,
             auto_start: true,
             history_len: 120,
@@ -200,9 +214,37 @@ mod tests {
         assert_eq!(back.payload_size, s.payload_size);
         assert_eq!(back.ttl, s.ttl);
         assert_eq!(back.max_threads, s.max_threads);
+        assert_eq!(back.limit_max_threads, s.limit_max_threads);
         assert_eq!(back.beep_on_fail, s.beep_on_fail);
         assert_eq!(back.auto_start, s.auto_start);
         assert_eq!(back.history_len, s.history_len);
+    }
+
+    /// 旧配置兼容（v1.1 新增字段）：不含 limit_max_threads 的 JSON 必须能加载且缺省为 true
+    #[test]
+    fn qa_old_config_without_limit_field_defaults_true() {
+        // 完整的 v1.0.0 设置 JSON（无 limit_max_threads）
+        let old = r#"{"interval_ms":800,"timeout_ms":1500,"payload_size":32,"ttl":128,"max_threads":256,"beep_on_fail":false,"auto_start":false,"history_len":60}"#;
+        let s: PingSettings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.interval_ms, 800, "旧字段必须被保留");
+        assert_eq!(s.max_threads, 256);
+        assert!(s.limit_max_threads, "旧配置缺省必须为 true（默认启用上限）");
+
+        // 整份 AppConfig（含旧 targets）也必须完好加载，不丢用户数据
+        let old_cfg = r#"{"version":1,"settings":{"interval_ms":1000,"timeout_ms":2000,"payload_size":32,"ttl":128,"max_threads":256,"beep_on_fail":false,"auto_start":true,"history_len":60},"targets":[{"name":"阿里 DNS","host":"223.5.5.5","enabled":true}]}"#;
+        let cfg: AppConfig = serde_json::from_str(old_cfg).unwrap();
+        assert!(cfg.settings.limit_max_threads, "缺省应为 true");
+        assert_eq!(cfg.targets.len(), 1, "旧配置的主机列表必须保留");
+        assert_eq!(cfg.targets[0].host, "223.5.5.5");
+        assert!(cfg.settings.auto_start);
+    }
+
+    /// 新增字段可被显式覆盖为 false 并正确往返
+    #[test]
+    fn qa_limit_field_can_be_set_false() {
+        let s: PingSettings =
+            serde_json::from_str(r#"{"limit_max_threads":false}"#).unwrap();
+        assert!(!s.limit_max_threads);
     }
 
     /// AppConfig（设置 + 目标列表）序列化 → 反序列化 完全一致

@@ -1,6 +1,6 @@
 // Tauri invoke 命令封装：与 Rust 侧 #[tauri::command] 一一对应
 import { invoke } from "@tauri-apps/api/core";
-import type { PingSettings, Snapshot, TargetEntry } from "../types";
+import type { ImportPayload, PingSettings, Snapshot, TargetEntry } from "../types";
 
 /** 获取当前完整快照（目标列表 + 设置 + 汇总统计） */
 export const getState = (): Promise<Snapshot> => invoke<Snapshot>("get_state");
@@ -54,3 +54,7 @@ export const exportReport = (
 
 /** 获取配置文件路径 */
 export const getConfigPath = (): Promise<string> => invoke<string>("get_config_path");
+
+/** 读取导入文件（txt/csv → 文本；xlsx/xls/ods → 表格）；解析动作仍在前端完成 */
+export const readImportFile = (path: string): Promise<ImportPayload> =>
+  invoke<ImportPayload>("read_import_file", { path });

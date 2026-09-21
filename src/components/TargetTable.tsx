@@ -1,4 +1,4 @@
-// 主表格：对标 PingInfoView 的列布局，支持排序、多选（Ctrl/Shift）、键盘 Delete 删除
+// 主表格：多列展示，支持排序、多选（Ctrl/Shift + 复选框）、表头全选、键盘 Delete 删除
 import React from "react";
 import type { Status, TargetState } from "../types";
 import {
@@ -35,6 +35,10 @@ export interface TargetTableProps {
   onSort: (key: SortKey) => void;
   onRowClick: (id: number, e: React.MouseEvent) => void;
   onToggleEnabled: (id: number, enabled: boolean) => void;
+  /** 勾选/取消勾选单行（与行选中状态共用 selected 集合） */
+  onToggleSelect: (id: number) => void;
+  /** 表头全选/全不选（仅作用当前传入的 targets） */
+  onToggleSelectAll: (selectAll: boolean) => void;
   historyLen: number;
 }
 
@@ -46,6 +50,8 @@ interface Col {
 }
 
 const COLS: Col[] = [
+  // 选择列：无排序键，表头位置渲染全选复选框
+  { key: null, label: "", align: "center", className: "w-10" },
   { key: "enabled", label: "启用", align: "center", className: "w-12" },
   { key: "name", label: "备注名", align: "left", className: "min-w-[120px]" },
   { key: "host", label: "主机名", align: "left", className: "min-w-[150px]" },
@@ -99,8 +105,12 @@ const TargetTable: React.FC<TargetTableProps> = ({
   onSort,
   onRowClick,
   onToggleEnabled,
+  onToggleSelect,
+  onToggleSelectAll,
   historyLen,
 }) => {
+  const headCheckRef = React.useRef<HTMLInputElement | null>(null);
+
   const sorted = React.useMemo(() => {
     const arr = [...targets];
     arr.sort((a, b) => {
@@ -110,14 +120,24 @@ const TargetTable: React.FC<TargetTableProps> = ({
     return arr;
   }, [targets, sortKey, sortDir]);
 
+  // 全选状态只针对当前传入的 targets（即搜索过滤后可见的列表）
+  const allSelected = targets.length > 0 && selected.size === targets.length;
+  const indeterminate = selected.size > 0 && selected.size < targets.length;
+
+  React.useEffect(() => {
+    if (headCheckRef.current) {
+      headCheckRef.current.indeterminate = indeterminate;
+    }
+  }, [indeterminate]);
+
   return (
     <div className="h-full overflow-auto">
       <table className="w-full border-collapse text-[12px]">
         <thead className="sticky top-0 z-10">
           <tr className="bg-slate-100 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-600">
-            {COLS.map((c) => (
+            {COLS.map((c, i) => (
               <th
-                key={c.label}
+                key={i}
                 onClick={() => c.key && onSort(c.key)}
                 className={`px-2 py-1.5 font-medium text-slate-600 dark:text-slate-300 ${
                   c.key ? "cursor-pointer select-none hover:bg-slate-200 dark:hover:bg-slate-700" : ""
@@ -126,8 +146,21 @@ const TargetTable: React.FC<TargetTableProps> = ({
                 }`}
                 title={c.key ? "点击排序" : undefined}
               >
-                {c.label}
-                {c.key === sortKey && <span className="ml-1 text-sky-500">{sortDir === "asc" ? "▲" : "▼"}</span>}
+                {i === 0 ? (
+                  <input
+                    ref={headCheckRef}
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) => onToggleSelectAll(e.target.checked)}
+                    className="align-middle cursor-pointer accent-sky-600"
+                    title="全选 / 全不选"
+                  />
+                ) : (
+                  <>
+                    {c.label}
+                    {c.key === sortKey && <span className="ml-1 text-sky-500">{sortDir === "asc" ? "▲" : "▼"}</span>}
+                  </>
+                )}
               </th>
             ))}
           </tr>
@@ -146,6 +179,16 @@ const TargetTable: React.FC<TargetTableProps> = ({
                   isPrimary ? "ring-1 ring-sky-400 ring-inset" : ""
                 }`}
               >
+                <td className="px-2 py-1 text-center">
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={() => onToggleSelect(t.id)}
+                    className="align-middle cursor-pointer accent-sky-600"
+                    title="选择此行"
+                  />
+                </td>
                 <td className="px-2 py-1 text-center">
                   <input
                     type="checkbox"

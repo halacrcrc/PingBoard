@@ -35,6 +35,8 @@ export interface PingSettings {
   payload_size: number;
   ttl: number;
   max_threads: number;
+  /** 是否启用 max_threads 并发上限（关闭后仅保留 4096 硬保护） */
+  limit_max_threads: boolean;
   beep_on_fail: boolean;
   auto_start: boolean;
   history_len: number;
@@ -59,6 +61,11 @@ export interface TargetEntry {
   name: string;
   host: string;
 }
+
+/** 文件导入解析结果（对应 Rust 的 ImportPayload） */
+export type ImportPayload =
+  | { kind: "text"; text: string }
+  | { kind: "table"; rows: string[][] };
 
 /** 详情面板日志条目 */
 export interface LogEntry {

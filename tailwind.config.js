@@ -6,7 +6,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 状态色：绿=正常，红=失败（与 PingInfoView 语义一致）
+        // 状态色：绿=正常，红=失败
         okgreen: "#16a34a",
         failred: "#dc2626",
       },

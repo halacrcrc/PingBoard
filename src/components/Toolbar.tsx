@@ -14,9 +14,13 @@ export interface ToolbarProps {
   onStartAll: () => void;
   onStopAll: () => void;
   onResetAll: () => void;
+  /** 清空列表（删除全部目标及其统计） */
+  onClearList: () => void;
   onOpenSettings: () => void;
   onExport: (format: "csv" | "txt" | "html", onlySelected: boolean) => void;
   selectionCount: number;
+  onStartSelected: () => void;
+  onStopSelected: () => void;
   onDeleteSelected: () => void;
 }
 
@@ -42,9 +46,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onStartAll,
   onStopAll,
   onResetAll,
+  onClearList,
   onOpenSettings,
   onExport,
   selectionCount,
+  onStartSelected,
+  onStopSelected,
   onDeleteSelected,
 }) => {
   const [exportOpen, setExportOpen] = React.useState(false);
@@ -91,6 +98,14 @@ const Toolbar: React.FC<ToolbarProps> = ({
       >
         清空统计
       </button>
+      <button
+        className={btnDanger}
+        onClick={onClearList}
+        disabled={disabled || totalCount === 0}
+        title="删除全部目标（含其统计）"
+      >
+        清空列表
+      </button>
 
       {/* 导出下拉 */}
       <div className="relative">
@@ -121,9 +136,18 @@ const Toolbar: React.FC<ToolbarProps> = ({
       </button>
 
       {selectionCount > 0 && (
-        <button className={btnDanger} onClick={onDeleteSelected}>
-          删除选中（{selectionCount}）
-        </button>
+        <>
+          <div className="w-px h-6 bg-slate-200 dark:bg-slate-700" />
+          <button className={btnNeutral} onClick={onStartSelected}>
+            开始选中（{selectionCount}）
+          </button>
+          <button className={btnNeutral} onClick={onStopSelected}>
+            停止选中（{selectionCount}）
+          </button>
+          <button className={btnDanger} onClick={onDeleteSelected}>
+            删除选中（{selectionCount}）
+          </button>
+        </>
       )}
 
       <div className="flex-1" />

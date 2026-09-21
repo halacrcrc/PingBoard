@@ -11,6 +11,7 @@ import StatusBar from "./components/StatusBar";
 import DetailPanel from "./components/DetailPanel";
 import AddTargetsDialog from "./components/AddTargetsDialog";
 import SettingsDialog from "./components/SettingsDialog";
+import ConfirmDialog from "./components/ConfirmDialog";
 
 /** 默认设置（与 Rust 侧 PingSettings::default 保持一致） */
 const DEFAULT_SETTINGS: PingSettings = {
@@ -19,6 +20,7 @@ const DEFAULT_SETTINGS: PingSettings = {
   payload_size: 32,
   ttl: 128,
   max_threads: 256,
+  limit_max_threads: true,
   beep_on_fail: false,
   auto_start: false,
   history_len: 60,
@@ -59,26 +61,49 @@ const App: React.FC = () => {
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
   const [logs, setLogs] = React.useState<Record<number, LogEntry[]>>({});
   const [toast, setToast] = React.useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = React.useState(false);
 
   const prevStatusRef = React.useRef<Record<number, Status>>({});
   const audioCtxRef = React.useRef<AudioContext | null>(null);
+  /** 保存 ping-snapshot 的取消订阅函数，卸载时判空 + 容错调用 */
+  const unlistenRef = React.useRef<(() => void) | null>(null);
 
   /* ------------------------- 事件订阅与初始化 ------------------------- */
 
   React.useEffect(() => {
-    let unlisten: (() => void) | undefined;
     let disposed = false;
-    listen<Snapshot>("ping-snapshot", (e) => setSnapshot(e.payload)).then((u) => {
-      if (disposed) u();
-      else unlisten = u;
-    });
+    listen<Snapshot>("ping-snapshot", (e) => setSnapshot(e.payload))
+      .then((u) => {
+        if (disposed) {
+          // 订阅在清理之后才就绪：立即取消，并容错（资源可能已释放）
+          try {
+            u();
+          } catch {
+            /* 忽略 */
+          }
+        } else {
+          unlistenRef.current = u;
+        }
+      })
+      .catch(() => {
+        /* 订阅失败时静默忽略，不影响 get_state 兜底 */
+      });
     api
       .getState()
       .then(setSnapshot)
       .catch((e) => showToast(`初始化失败：${String(e)}`));
     return () => {
       disposed = true;
-      if (unlisten) unlisten();
+      const u = unlistenRef.current;
+      unlistenRef.current = null;
+      // 仅在确实是函数时调用；卸载阶段底层资源可能已释放，用 try/catch 兜底
+      if (typeof u === "function") {
+        try {
+          u();
+        } catch {
+          /* 忽略卸载期清理异常 */
+        }
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -311,6 +336,50 @@ const App: React.FC = () => {
 
   const primaryLogs = primaryId !== null ? logs[primaryId] ?? [] : [];
 
+  /* ------------------------- 复选框选择 / 选中项启停 / 清空列表 ------------------------- */
+
+  // 切换单行勾选（与行选中共用 selected 集合）；勾选时同步主选中项
+  const handleToggleSelect = (id: number) => {
+    const next = new Set(selected);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+      setPrimaryId(id);
+    }
+    setSelected(next);
+  };
+
+  // 表头全选 / 全不选：仅作用当前过滤后可见的列表
+  const handleToggleSelectAll = (selectAll: boolean) => {
+    if (selectAll) {
+      const ids = filtered.map((t) => t.id);
+      setSelected(new Set(ids));
+      if (ids.length > 0) setPrimaryId(ids[0]);
+    } else {
+      setSelected(new Set());
+    }
+  };
+
+  const handleStartSelected = () => guard(() => api.startPinging([...selected]));
+  const handleStopSelected = () => guard(() => api.stopPinging([...selected]));
+
+  const handleClearList = () => {
+    if (snapshot.targets.length > 0) setConfirmClear(true);
+  };
+
+  const doClearList = () => {
+    setConfirmClear(false);
+    const ids = snapshot.targets.map((t) => t.id);
+    if (ids.length === 0) return;
+    // remove_targets 内部会先停止对应工作线程，再删除目标
+    guard(() => api.removeTargets(ids)).then(() => {
+      setSelected(new Set());
+      setPrimaryId(null);
+      setLogs({});
+    });
+  };
+
   /* ------------------------- 渲染 ------------------------- */
 
   return (
@@ -328,9 +397,12 @@ const App: React.FC = () => {
         onStartAll={handleStartAll}
         onStopAll={handleStopAll}
         onResetAll={handleResetAll}
+        onClearList={handleClearList}
         onOpenSettings={() => setShowSettings(true)}
         onExport={handleExport}
         selectionCount={selected.size}
+        onStartSelected={handleStartSelected}
+        onStopSelected={handleStopSelected}
         onDeleteSelected={deleteSelected}
       />
 
@@ -381,6 +453,8 @@ const App: React.FC = () => {
               onSort={handleSort}
               onRowClick={handleRowClick}
               onToggleEnabled={handleToggleEnabled}
+              onToggleSelect={handleToggleSelect}
+              onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
             />
           )}
@@ -407,6 +481,21 @@ const App: React.FC = () => {
         settings={snapshot.settings}
         onClose={() => setShowSettings(false)}
         onSaved={() => showToast("设置已保存并应用")}
+      />
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="清空列表"
+        danger
+        confirmText="清空列表"
+        message={
+          <>
+            确定要删除全部 <b>{snapshot.targets.length}</b> 个目标吗？此操作会同时清除它们的主机条目与统计数据，
+            且无法撤销。
+          </>
+        }
+        onConfirm={doClearList}
+        onCancel={() => setConfirmClear(false)}
       />
 
       {toast && (

@@ -1,6 +1,7 @@
-// 添加主机对话框：支持单个添加、批量粘贴（自动去重/跳过注释）与 IP 段展开
+// 添加主机对话框：支持单个添加、批量粘贴（自动去重/跳过注释）与 IP 段展开、从文件导入
 import React from "react";
-import type { TargetEntry } from "../types";
+import * as dialog from "@tauri-apps/plugin-dialog";
+import type { ImportPayload, TargetEntry } from "../types";
 import * as api from "../lib/api";
 
 export interface AddTargetsDialogProps {
@@ -13,6 +14,9 @@ export interface AddTargetsDialogProps {
 
 /** 单次批量展开上限，防止误输入造成爆炸 */
 const MAX_BATCH = 1024;
+
+/** 文件选择对话框支持的扩展名 */
+const FILE_EXTS = ["txt", "csv", "xlsx", "xls", "xlsm", "ods"];
 
 const row = "flex items-center gap-3 py-1";
 const label = "w-20 shrink-0 text-slate-600 dark:text-slate-300";
@@ -103,14 +107,43 @@ export function parseBatch(text: string): TargetEntry[] {
   return out.slice(0, MAX_BATCH);
 }
 
+/** 表头识别：第 1 列（主机）候选 */
+const HEADER_HOST_RE = /^(主机|主机名|ip|ip地址|地址|host|hostname)$/;
+/** 表头识别：第 2 列（备注）候选 */
+const HEADER_NAME_RE = /^(备注|备注名|名称|名字|说明|描述|name|note|remark|desc|comment)$/;
+
+/**
+ * 把表格行规范化为「每行一个 `主机\t备注`」的批量文本，再交给 parseBatch 统一解析。
+ *  - 仅识别第 1 行是否为表头（第 1 列命中主机关键字且第 2 列命中备注关键字则跳过）
+ *  - 第 1 列 = 主机，第 2 列 = 备注（可为空）
+ *  - 第 1 列为空的行跳过
+ */
+export function tableToBatchText(rows: string[][]): string {
+  const lines: string[] = [];
+  rows.forEach((r, idx) => {
+    const host = (r[0] ?? "").trim();
+    const name = (r[1] ?? "").trim();
+    if (idx === 0 && HEADER_HOST_RE.test(host.toLowerCase()) && HEADER_NAME_RE.test(name.toLowerCase())) {
+      return; // 跳过表头行
+    }
+    if (!host) return;
+    lines.push(name ? `${host}\t${name}` : host);
+  });
+  return lines.join("\n");
+}
+
 const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running }) => {
-  const [tab, setTab] = React.useState<"single" | "batch">("single");
+  const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
   const [name, setName] = React.useState("");
   const [batch, setBatch] = React.useState("");
   const [startNow, setStartNow] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  // 文件导入状态
+  const [filePath, setFilePath] = React.useState("");
+  const [filePayload, setFilePayload] = React.useState<ImportPayload | null>(null);
+  const [fileBusy, setFileBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -119,6 +152,14 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
       setStartNow(true);
     }
   }, [open]);
+
+  // 文件导入：文本直接解析；表格先规范化为批量文本再解析（复用同一套解析逻辑）
+  // ⚠️ 必须在 `if (!open) return null` 之前无条件调用（React Hooks 规则：hook 不得位于条件 return 之后）
+  const fileEntries = React.useMemo<TargetEntry[]>(() => {
+    if (tab !== "file" || !filePayload) return [];
+    const text = filePayload.kind === "text" ? filePayload.text : tableToBatchText(filePayload.rows);
+    return parseBatch(text);
+  }, [tab, filePayload]);
 
   if (!open) return null;
 
@@ -140,6 +181,8 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
       setHost("");
       setName("");
       setBatch("");
+      setFilePath("");
+      setFilePayload(null);
       onClose();
     } catch (e) {
       setError(String(e));
@@ -162,6 +205,61 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     await doAdd(parsed);
   };
 
+  const onSubmitFile = async () => {
+    await doAdd(fileEntries);
+  };
+
+  /** 打开文件对话框 → 读取内容 → 解析（不在此处提交） */
+  const pickFile = async () => {
+    setError(null);
+    try {
+      const selected = await dialog.open({
+        multiple: false,
+        directory: false,
+        title: "选择主机列表文件",
+        filters: [{ name: "主机列表", extensions: FILE_EXTS }],
+      });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (!path) return;
+      setFilePath(path);
+      setFileBusy(true);
+      setFilePayload(null);
+      const payload = await api.readImportFile(path);
+      setFilePayload(payload);
+    } catch (e) {
+      setFilePayload(null);
+      setError(`读取文件失败：${String(e)}`);
+    } finally {
+      setFileBusy(false);
+    }
+  };
+
+  const tabClass = (active: boolean) =>
+    `px-3 h-7 rounded-t border-b-2 ${
+      active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500"
+    }`;
+
+  // 目标预览块（批量与文件页共用样式）
+  const preview = (list: TargetEntry[]) => (
+    <>
+      <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+        解析到 <span className="font-mono text-sky-600 dark:text-sky-400">{list.length}</span> 个目标
+        <span className="text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
+      </div>
+      {list.length > 0 && (
+        <div className="mt-2 max-h-28 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+          {list.slice(0, 200).map((p, i) => (
+            <div key={i} className="truncate">
+              {p.host}
+              <span className="text-slate-400"> · {p.name}</span>
+            </div>
+          ))}
+          {list.length > 200 && <div className="text-slate-400">… 其余 {list.length - 200} 个</div>}
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="w-[720px] max-h-[86vh] flex flex-col rounded-lg shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
@@ -175,21 +273,18 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
         <div className="px-4 py-3 flex-1 overflow-auto">
           {/* 标签切换 */}
           <div className="flex gap-1 mb-3">
-            <button
-              className={`px-3 h-7 rounded-t border-b-2 ${tab === "single" ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500"}`}
-              onClick={() => setTab("single")}
-            >
+            <button className={tabClass(tab === "single")} onClick={() => setTab("single")}>
               单个添加
             </button>
-            <button
-              className={`px-3 h-7 rounded-t border-b-2 ${tab === "batch" ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500"}`}
-              onClick={() => setTab("batch")}
-            >
+            <button className={tabClass(tab === "batch")} onClick={() => setTab("batch")}>
               批量粘贴 / IP 段
+            </button>
+            <button className={tabClass(tab === "file")} onClick={() => setTab("file")}>
+              从文件导入
             </button>
           </div>
 
-          {tab === "single" ? (
+          {tab === "single" && (
             <div>
               <div className={row}>
                 <span className={label}>主机名/IP</span>
@@ -213,7 +308,9 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
                 />
               </div>
             </div>
-          ) : (
+          )}
+
+          {tab === "batch" && (
             <div>
               <textarea
                 className="w-full h-56 px-2 py-1.5 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-sky-500 resize-none"
@@ -221,21 +318,35 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
                 placeholder={"每行一个，支持「主机 备注」：\n223.5.5.5 阿里 DNS\n114.114.114.114 114DNS\nwww.baidu.com\n\n# 以 # 开头为注释，可跳过\n# 支持 IP 段展开：\n192.168.1.1-254 内网段\n10.0.0.1-10.0.0.20"}
                 onChange={(e) => setBatch(e.target.value)}
               />
-              <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
-                解析到 <span className="font-mono text-sky-600 dark:text-sky-400">{parsed.length}</span> 个目标
-                <span className="text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
-              </div>
-              {parsed.length > 0 && (
-                <div className="mt-2 max-h-28 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                  {parsed.slice(0, 200).map((p, i) => (
-                    <div key={i} className="truncate">
-                      {p.host}
-                      <span className="text-slate-400"> · {p.name}</span>
-                    </div>
-                  ))}
-                  {parsed.length > 200 && <div className="text-slate-400">… 其余 {parsed.length - 200} 个</div>}
+              {preview(parsed)}
+            </div>
+          )}
+
+          {tab === "file" && (
+            <div>
+              <div className="flex items-center gap-3">
+                <button
+                  className="px-3 h-8 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                  onClick={pickFile}
+                  disabled={fileBusy}
+                >
+                  选择文件…
+                </button>
+                <div className="flex-1 min-w-0 truncate font-mono text-[12px] text-slate-600 dark:text-slate-300" title={filePath}>
+                  {filePath || <span className="text-slate-400">支持 .txt / .csv / .xlsx / .xls / .xlsm / .ods</span>}
                 </div>
+              </div>
+
+              <div className="mt-2 text-[12px] leading-relaxed text-slate-500 dark:text-slate-400">
+                <div>· txt / csv：每行「主机 备注」，支持 # 注释与 IP 段（如 192.168.1.1-254）</div>
+                <div>· Excel：第 1 列主机、第 2 列备注，自动跳过表头行，仅读取第一个工作表</div>
+              </div>
+
+              {fileBusy && (
+                <div className="mt-3 text-[12px] text-sky-600 dark:text-sky-400">正在读取并解析文件…</div>
               )}
+
+              {!fileBusy && filePayload && preview(fileEntries)}
             </div>
           )}
 
@@ -263,10 +374,16 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
           </button>
           <button
             className="px-3 h-7 rounded bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50"
-            onClick={tab === "single" ? onSubmitSingle : onSubmitBatch}
-            disabled={busy}
+            onClick={tab === "single" ? onSubmitSingle : tab === "batch" ? onSubmitBatch : onSubmitFile}
+            disabled={busy || (tab === "file" && fileBusy)}
           >
-            {busy ? "添加中…" : tab === "single" ? "添加" : `添加 ${parsed.length} 个`}
+            {busy
+              ? "添加中…"
+              : tab === "single"
+              ? "添加"
+              : tab === "batch"
+              ? `添加 ${parsed.length} 个`
+              : `添加 ${fileEntries.length} 个`}
           </button>
         </div>
       </div>

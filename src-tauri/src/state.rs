@@ -27,6 +27,9 @@ pub const SNAPSHOT_EVENT: &str = "ping-snapshot";
 /// 快照发射间隔（毫秒）
 const SNAPSHOT_INTERVAL_MS: u64 = 500;
 
+/// 关闭「线程数上限」后仍保留的硬保护上限，防止误加入海量目标拖垮系统
+pub const HARD_MAX_THREADS: usize = 4096;
+
 /// 工作线程句柄
 struct WorkerHandle {
     stop: Arc<AtomicBool>,
@@ -250,7 +253,10 @@ impl AppState {
 
     /// 开始 Ping；`ids` 为 None 表示启动全部已启用目标
     pub fn start(&self, ids: Option<Vec<u64>>) -> Result<(), String> {
-        let max_threads = self.inner.settings.read().unwrap().max_threads;
+        let (max_threads, limit_max_threads) = {
+            let s = self.inner.settings.read().unwrap();
+            (s.max_threads, s.limit_max_threads)
+        };
 
         // 选出候选目标
         let candidates: Vec<SharedTarget> = {
@@ -276,13 +282,27 @@ impl AppState {
             .filter(|t| !active.contains(&t.lock().unwrap().id))
             .collect();
 
-        if active.len() + to_start.len() > max_threads {
-            return Err(format!(
-                "线程数将超过上限 {}（当前运行 {}，待启动 {}），请减少目标或提高「最大线程数」设置",
-                max_threads,
-                active.len(),
-                to_start.len()
-            ));
+        let planned = active.len() + to_start.len();
+        if limit_max_threads {
+            // 开启上限（默认）：维持原有行为与错误文案
+            if planned > max_threads {
+                return Err(format!(
+                    "线程数将超过上限 {}（当前运行 {}，待启动 {}），请减少目标或提高「最大线程数」设置",
+                    max_threads,
+                    active.len(),
+                    to_start.len()
+                ));
+            }
+        } else {
+            // 关闭上限：不再按 max_threads 拦截，仅保留 4096 硬保护
+            if planned > HARD_MAX_THREADS {
+                return Err(format!(
+                    "并发线程数超过硬上限 {}（当前运行 {}，待启动 {}），请减少目标数量",
+                    HARD_MAX_THREADS,
+                    active.len(),
+                    to_start.len()
+                ));
+            }
         }
 
         for t in to_start {
@@ -601,6 +621,7 @@ mod tests {
                 payload_size: 32,
                 ttl: 128,
                 max_threads,
+                limit_max_threads: true,
                 beep_on_fail: false,
                 auto_start,
                 history_len: 60,
@@ -614,6 +635,38 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    /// 构造带指定目标数与上限开关的配置（用于并发开关测试）
+    fn build_cfg_limited(
+        target_count: usize,
+        max_threads: usize,
+        limit_max_threads: bool,
+    ) -> AppConfig {
+        let mut cfg = AppConfig {
+            version: 1,
+            settings: PingSettings {
+                interval_ms: 1000,
+                timeout_ms: 1000,
+                payload_size: 32,
+                ttl: 128,
+                max_threads,
+                limit_max_threads,
+                beep_on_fail: false,
+                auto_start: false,
+                history_len: 60,
+            },
+            targets: Vec::new(),
+        };
+        for i in 0..target_count {
+            // 全部使用回环地址，避免依赖外网
+            cfg.targets.push(TargetConfig {
+                name: format!("loop-{}", i),
+                host: "127.0.0.1".to_string(),
+                enabled: true,
+            });
+        }
+        cfg
     }
 
     /* ===================== QA 新增：主机名解析 ===================== */
@@ -732,6 +785,183 @@ mod tests {
             2,
             "运行中新增目标应自动启动新线程"
         );
+        st.stop(None);
+        assert_eq!(st.snapshot().active_threads, 0);
+    }
+
+    /* ===================== 新增：并发上限开关 ===================== */
+
+    /// 关闭「线程数上限」后：目标数超过 max_threads 但未超 4096 → 不报错且确实全部启动
+    #[test]
+    fn qa_limit_disabled_allows_exceeding_max_threads() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(3, 2, false));
+
+        // 3 > max_threads(2)，但上限已关闭 → 应正常启动
+        st.start(None).expect("关闭上限后不应因 max_threads 报错");
+        let n = st.snapshot().active_threads;
+        eprintln!("[qa] 关闭上限后活跃线程数：{}", n);
+        assert_eq!(n, 3, "关闭上限后应启动全部 3 个线程");
+
+        st.stop(None);
+        assert_eq!(st.snapshot().active_threads, 0, "stop 后应清理干净");
+    }
+
+    /// 开启上限（默认）时：同样超过 max_threads 必须报错且不启动
+    #[test]
+    fn qa_limit_enabled_still_blocks_before_start() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(3, 2, true));
+        let err = st.start(None).expect_err("开启上限时应报错");
+        assert!(err.contains("上限"), "错误信息应含「上限」：{}", err);
+        assert_eq!(st.snapshot().active_threads, 0);
+    }
+
+    /// 关闭上限后仍保留 4096 硬保护：4097 个目标必须返回可读错误且不启动任何线程
+    #[test]
+    fn qa_limit_disabled_still_enforces_hard_4096() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(4097, 8, false));
+        let err = st.start(None).expect_err("超过 4096 硬上限应报错");
+        eprintln!("[qa] 硬上限错误信息：{}", err);
+        assert!(err.contains("4096"), "错误信息应包含硬上限 4096：{}", err);
+        assert_eq!(st.snapshot().active_threads, 0, "报错后不得启动线程");
+    }
+
+    /// 硬上限常量口径固定为 4096（前端文案与后端一致）
+    #[test]
+    fn qa_hard_max_threads_constant_is_4096() {
+        assert_eq!(HARD_MAX_THREADS, 4096);
+    }
+
+    /* ===================== 新增：选中项单独启停 ===================== */
+
+    /// 需求 5：start(ids) 只启动选中目标；stop(ids) 只停选中项，不影响其它运行中的目标
+    #[test]
+    fn qa_selective_start_and_stop_by_ids() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(3, 256, true));
+        let ids: Vec<u64> = st.snapshot().targets.iter().map(|t| t.id).collect();
+        assert_eq!(ids.len(), 3);
+
+        // 只启动前两个
+        st.start(Some(vec![ids[0], ids[1]])).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let snap = st.snapshot();
+        assert_eq!(snap.active_threads, 2, "只应启动选中的 2 个目标");
+        let running: Vec<u64> = snap.targets.iter().filter(|t| t.running).map(|t| t.id).collect();
+        assert!(running.contains(&ids[0]) && running.contains(&ids[1]), "选中的目标应运行");
+        assert!(!running.contains(&ids[2]), "未选中的目标不应运行");
+
+        // 只停第 1 个，未选中的第 2 个应继续运行
+        st.stop(Some(vec![ids[0]]));
+        std::thread::sleep(Duration::from_millis(200));
+        let snap2 = st.snapshot();
+        assert_eq!(snap2.active_threads, 1, "只停 1 个后应剩 1 个线程");
+        let t1 = snap2.targets.iter().find(|t| t.id == ids[0]).unwrap();
+        let t2 = snap2.targets.iter().find(|t| t.id == ids[1]).unwrap();
+        assert!(!t1.running, "被选停的目标应停止");
+        assert!(t2.running, "未被选停的目标必须继续运行");
+
+        st.stop(None);
+        assert_eq!(st.snapshot().active_threads, 0);
+    }
+
+    /* ============== QA v1.1.0 追加：并发开关真实行为 + 选中启停强化 ============== */
+
+    /// C1：limit=false + max_threads=2 + 3 回环目标 → 不报错，且 3 个都“真的开始”
+    /// 用 sent 计数增长证明（而不是只看 start 返回值）
+    #[test]
+    fn qa_v11_limit_disabled_three_targets_actually_send() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(3, 2, false));
+        st.start(None).expect("关闭上限后不应因 max_threads 报错");
+        std::thread::sleep(Duration::from_millis(2500));
+        let snap = st.snapshot();
+        eprintln!(
+            "[qa] limit=false: threads={} sent={}",
+            snap.active_threads, snap.total_sent
+        );
+        assert_eq!(snap.active_threads, 3, "3 个线程都应启动");
+        for t in &snap.targets {
+            assert!(t.sent >= 1, "目标 {} 应已发包（sent={}）", t.host, t.sent);
+            assert!(t.running, "目标 {} 应处于运行态", t.host);
+        }
+        st.stop(None);
+        assert_eq!(st.snapshot().active_threads, 0, "停止后无残留线程");
+    }
+
+    /// C2：limit=true（默认）+ max_threads=2 + 3 目标 → 可读中文错误，且「没有任何线程启动」
+    /// 等待后确认 active_threads 恒为 0 且 sent 不增长
+    #[test]
+    fn qa_v11_limit_enabled_blocks_and_no_thread_started() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(3, 2, true));
+        let err = st.start(None).expect_err("超过上限应报错");
+        eprintln!("[qa] limit=true 错误信息：{}", err);
+        assert!(err.contains("上限"), "错误信息应含「上限」：{}", err);
+        std::thread::sleep(Duration::from_millis(1200));
+        let snap = st.snapshot();
+        assert_eq!(snap.active_threads, 0, "报错后不得启动任何线程");
+        for t in &snap.targets {
+            assert!(!t.running, "目标 {} 不应处于运行态", t.host);
+            assert_eq!(t.sent, 0, "目标 {} 不应发包（sent={}）", t.host, t.sent);
+        }
+    }
+
+    /// C3：4096 硬保护（limit=false）—— 4097 目标必须返回含 4096 的可读错误，不启动线程
+    /// 说明：不真实创建 4097 个线程，只触发 state.start 的拦截分支（构造 4097 个回环目标配置）
+    #[test]
+    fn qa_v11_hard_4096_rejects_4097_without_spawning() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(4097, 8, false));
+        let err = st.start(None).expect_err("超过 4096 硬上限应报错");
+        eprintln!("[qa] 硬上限错误信息：{}", err);
+        assert!(err.contains("4096"), "错误信息应含硬上限 4096：{}", err);
+        assert_eq!(st.snapshot().active_threads, 0, "报错后不得启动线程");
+        // 恰好 4096 的边界：不报 max_threads 相关错（但会真的启动 4096 线程，风险高，故不实际启动）
+        assert_eq!(HARD_MAX_THREADS, 4096);
+    }
+
+    /// D5 强化：起 4 个目标全跑 → stop(ids[0]) → 仅 id0 停，其余 3 个仍在 run 且 sent 继续增长
+    #[test]
+    fn qa_v11_stop_one_of_four_keeps_others_sending() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(4, 256, true));
+        let ids: Vec<u64> = st.snapshot().targets.iter().map(|t| t.id).collect();
+        assert_eq!(ids.len(), 4);
+
+        st.start(None).unwrap();
+        std::thread::sleep(Duration::from_millis(2200));
+        assert_eq!(st.snapshot().active_threads, 4, "4 个目标应全部运行");
+
+        st.stop(Some(vec![ids[0]]));
+        // stop 会 join 工作线程后才返回，故此刻取到的 sent 已稳定
+        let after_stop = st.snapshot();
+        let s0 = after_stop.targets.iter().find(|t| t.id == ids[0]).unwrap().sent;
+        let others_before: Vec<u64> = ids[1..]
+            .iter()
+            .map(|id| after_stop.targets.iter().find(|t| t.id == *id).unwrap().sent)
+            .collect();
+        assert_eq!(after_stop.active_threads, 3, "只停 1 个后应剩 3 个线程");
+
+        std::thread::sleep(Duration::from_millis(2200));
+        let after = st.snapshot();
+        let t0 = after.targets.iter().find(|t| t.id == ids[0]).unwrap();
+        assert!(!t0.running, "被选停目标应停止");
+        assert_eq!(t0.sent, s0, "被选停目标 sent 不应再增长（{} → {}）", s0, t0.sent);
+        for (i, id) in ids[1..].iter().enumerate() {
+            let t = after.targets.iter().find(|t| t.id == *id).unwrap();
+            assert!(t.running, "其余目标 {} 应继续运行", id);
+            assert!(
+                t.sent > others_before[i],
+                "其余目标 {} 的 sent 应继续增长（{} → {}）",
+                id,
+                others_before[i],
+                t.sent
+            );
+        }
+        eprintln!("[qa] stop-one: active={} total_sent={}", after.active_threads, after.total_sent);
         st.stop(None);
         assert_eq!(st.snapshot().active_threads, 0);
     }

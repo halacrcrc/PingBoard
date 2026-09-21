@@ -2,6 +2,7 @@
 mod commands;
 mod config;
 mod export;
+mod import;
 mod model;
 mod pinger;
 mod state;
@@ -27,6 +28,7 @@ pub fn run() {
             commands::resolve_host,
             commands::export_report,
             commands::get_config_path,
+            import::read_import_file,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

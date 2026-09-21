@@ -1,6 +1,6 @@
 [package]
 name = "pingboard"
-version = "1.0.0"
+version = "1.1.0"
 description = "PingBoard — 多主机 Ping 监视器"
 authors = ["PingBoard"]
 edition = "2021"
@@ -21,6 +21,10 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
+# 文件导入：Excel / ODS 读取（表格路径）
+calamine = "0.26"
+# 文件导入：GBK 等中文编码回退解码（文本路径）
+encoding_rs = "0.8"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_NetworkManagement_IpHelper",

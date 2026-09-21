@@ -25,11 +25,16 @@ const FIELDS: FieldDef[] = [
   { key: "timeout_ms", label: "超时时间 (ms)", hint: "≥100", min: 100, max: 60000, step: 100, type: "number" },
   { key: "payload_size", label: "负载大小 (字节)", hint: "0..65500", min: 0, max: 65500, step: 1, type: "number" },
   { key: "ttl", label: "TTL", hint: "1..255", min: 1, max: 255, step: 1, type: "number" },
-  { key: "max_threads", label: "最大线程数", hint: "1..1024", min: 1, max: 1024, step: 1, type: "number" },
   { key: "history_len", label: "趋势保留点数", hint: "10..600", min: 10, max: 600, step: 10, type: "number" },
   { key: "beep_on_fail", label: "失败时提示音", hint: "主机由成功转为失败时播放短提示音", type: "bool" },
   { key: "auto_start", label: "启动时自动开始", hint: "应用启动后自动开始 Ping 已启用目标", type: "bool" },
 ];
+
+/** 关闭并发上限后仍保留的硬保护（与 Rust 侧 state::HARD_MAX_THREADS 一致） */
+const HARD_MAX_THREADS = 4096;
+/** 最大线程数取值范围（与后端 stats::normalize_settings 一致） */
+const MAX_THREADS_MIN = 1;
+const MAX_THREADS_MAX = 1024;
 
 const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose, onSaved }) => {
   const [draft, setDraft] = React.useState<PingSettings>(settings);
@@ -124,6 +129,52 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
               ))}
             </tbody>
           </table>
+
+          {/* 并发线程数：开关 + 数字组合行 + 性能影响说明 */}
+          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+            <table className="w-full">
+              <tbody>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">启用线程数上限</td>
+                  <td className="py-1.5">
+                    <input
+                      type="checkbox"
+                      className="accent-emerald-600 w-4 h-4"
+                      checked={draft.limit_max_threads}
+                      onChange={(e) => setDraft((d) => ({ ...d, limit_max_threads: e.target.checked }))}
+                    />
+                    <span className="ml-2 text-[11px] text-slate-400">
+                      关闭后不再按「最大线程数」拦截，仅保留 {HARD_MAX_THREADS} 硬保护
+                    </span>
+                  </td>
+                </tr>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">最大线程数</td>
+                  <td className="py-1.5">
+                    <input
+                      type="number"
+                      className="w-32 h-7 px-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      value={String(draft.max_threads)}
+                      min={MAX_THREADS_MIN}
+                      max={MAX_THREADS_MAX}
+                      step={1}
+                      disabled={!draft.limit_max_threads}
+                      onChange={(e) => setNum("max_threads", e.target.value)}
+                    />
+                    <span className="ml-2 text-[11px] text-slate-400">
+                      {MAX_THREADS_MIN}..{MAX_THREADS_MAX}
+                      {!draft.limit_max_threads && "（当前未启用，仅记录）"}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+              每台主机会占用 1 个系统线程 + 1 个 ICMP 句柄。开启上限时按「最大线程数」拦截，可防止误加大量主机拖慢系统；
+              关闭后不再限制（仅保留 {HARD_MAX_THREADS} 硬保护）——200 台以内影响很小，500 台以上线程调度、内存与界面刷新开销会明显上升，
+              1000 台以上建议保持开启并分批启动。
+            </p>
+          </div>
 
           {error && <div className="mt-2 text-red-600 dark:text-red-400">{error}</div>}
 
