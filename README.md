@@ -43,11 +43,11 @@
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
 | `PingBoard_1.1.4_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.3_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.1.3_x64-setup-offline.exe`（**完整离线版**） | 217.9 MB（207.8 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
+| `PingBoard_1.1.4_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.4_x64-setup-offline.exe`（**完整离线版**） | 217.9 MB（207.8 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
 
-> **v1.1.4 只发布了在线引导版**（最小体积）；内置引导版与完整离线版沿用 **v1.1.3** 所出，
-> 三者的应用主体功能一致，差别仅在 WebView2 运行时的投递方式。如需 v1.1.4 的另两种变体，可自行按本文档构建。
+> v1.1.4 三种变体**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
+> 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
 > 三者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
 > - 在线引导版 = `downloadBootstrapper`：安装时若检测到缺少 WebView2，才去下载约 1.8 MB 的引导程序；
