@@ -7,6 +7,11 @@ export interface ConfirmDialogProps {
   title: string;
   message: React.ReactNode;
   confirmText?: string;
+  /** 主按钮是否禁用（例如「跳过重复」在无新目标可加时禁用） */
+  confirmDisabled?: boolean;
+  /** 可选次按钮文案（如「仍然全部添加」）；提供 secondaryText 时才会渲染 */
+  secondaryText?: string;
+  onSecondary?: () => void;
   danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -17,6 +22,9 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   title,
   message,
   confirmText = "确定",
+  confirmDisabled = false,
+  secondaryText,
+  onSecondary,
   danger = false,
   onConfirm,
   onCancel,
@@ -34,8 +42,8 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!open) return null;
 
   const confirmClass = danger
-    ? "px-3 h-7 rounded bg-red-600 hover:bg-red-700 text-white"
-    : "px-3 h-7 rounded bg-sky-600 hover:bg-sky-700 text-white";
+    ? "px-3 h-7 rounded bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+    : "px-3 h-7 rounded bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
@@ -59,7 +67,15 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           >
             取消
           </button>
-          <button className={confirmClass} onClick={onConfirm}>
+          {secondaryText && (
+            <button
+              className="px-3 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+              onClick={onSecondary}
+            >
+              {secondaryText}
+            </button>
+          )}
+          <button className={confirmClass} onClick={onConfirm} disabled={confirmDisabled}>
             {confirmText}
           </button>
         </div>

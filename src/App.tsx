@@ -46,6 +46,9 @@ const SAMPLE_TARGETS: TargetEntry[] = [
   { host: "www.baidu.com", name: "百度" },
 ];
 
+/** 关闭并发上限后仍保留的硬保护（与 Rust state::HARD_MAX_THREADS 及 SettingsDialog 保持一致） */
+const HARD_MAX_THREADS = 4096;
+
 const App: React.FC = () => {
   const [snapshot, setSnapshot] = React.useState<Snapshot>(EMPTY_SNAPSHOT);
   const [selected, setSelected] = React.useState<Set<number>>(new Set());
@@ -336,6 +339,12 @@ const App: React.FC = () => {
 
   const primaryLogs = primaryId !== null ? logs[primaryId] ?? [] : [];
 
+  // 已有目标 host 列表（小写化），用于「添加主机」对话框的跨批次重复检测
+  const existingHosts = React.useMemo(
+    () => snapshot.targets.map((t) => t.host.toLowerCase()),
+    [snapshot.targets]
+  );
+
   /* ------------------------- 复选框选择 / 选中项启停 / 清空列表 ------------------------- */
 
   // 切换单行勾选（与行选中共用 selected 集合）；勾选时同步主选中项
@@ -470,9 +479,19 @@ const App: React.FC = () => {
       <AddTargetsDialog
         open={showAdd}
         running={snapshot.running}
+        existingHosts={existingHosts}
         onClose={() => setShowAdd(false)}
-        onAdded={() => {
-          /* 依赖快照事件刷新，无需本地处理 */
+        onAdded={(ids) => {
+          // 用「添加前快照长度 + 本次新增数」估算添加后总数（刻意不等快照刷新后再判断）。
+          // 限制实际发生在启动 Ping 时：> max_threads（且启用上限）会被拦截，> 4096 为硬保护。
+          const nextTotal = snapshot.targets.length + ids.length;
+          if (nextTotal > HARD_MAX_THREADS) {
+            showToast(`共 ${nextTotal} 台，已超过 4096 台硬上限，超出部分无法启动`);
+          } else if (snapshot.settings.limit_max_threads && nextTotal > snapshot.settings.max_threads) {
+            showToast(
+              `共 ${nextTotal} 台，已超过并发上限 ${snapshot.settings.max_threads} 台：开始前请在「设置」中调高上限或关闭上限开关`
+            );
+          }
         }}
       />
 

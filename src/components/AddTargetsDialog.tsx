@@ -3,6 +3,7 @@ import React from "react";
 import * as dialog from "@tauri-apps/plugin-dialog";
 import type { ImportPayload, TargetEntry } from "../types";
 import * as api from "../lib/api";
+import ConfirmDialog from "./ConfirmDialog";
 
 export interface AddTargetsDialogProps {
   open: boolean;
@@ -10,6 +11,8 @@ export interface AddTargetsDialogProps {
   onAdded: (ids: number[]) => void;
   /** 立即开始 ping（默认勾选） */
   running: boolean;
+  /** 列表中已有目标的 host 列表（已小写化），用于跨批次重复检测 */
+  existingHosts: string[];
 }
 
 /** 单次批量展开上限，防止误输入造成爆炸 */
@@ -132,7 +135,7 @@ export function tableToBatchText(rows: string[][]): string {
   return lines.join("\n");
 }
 
-const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running }) => {
+const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts }) => {
   const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
   const [name, setName] = React.useState("");
@@ -144,14 +147,24 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
   const [filePath, setFilePath] = React.useState("");
   const [filePayload, setFilePayload] = React.useState<ImportPayload | null>(null);
   const [fileBusy, setFileBusy] = React.useState(false);
+  // 跨批次重复确认状态：非空时弹出确认框（记录本次待提交条目与其重复 host）
+  const [dupPrompt, setDupPrompt] = React.useState<{ entries: TargetEntry[]; dups: string[] } | null>(null);
 
   React.useEffect(() => {
     if (open) {
       setError(null);
       setBusy(false);
       setStartNow(true);
+      setDupPrompt(null);
     }
   }, [open]);
+
+  // 已有目标的 host 集合（去首尾空白 + 小写），用 Set 保证 O(1) 查找。
+  // ⚠️ 必须在 `if (!open) return null` 之前无条件调用（React Hooks 规则：hook 不得位于条件 return 之后）
+  const existingSet = React.useMemo(
+    () => new Set(existingHosts.map((h) => h.trim().toLowerCase())),
+    [existingHosts]
+  );
 
   // 文件导入：文本直接解析；表格先规范化为批量文本再解析（复用同一套解析逻辑）
   // ⚠️ 必须在 `if (!open) return null` 之前无条件调用（React Hooks 规则：hook 不得位于条件 return 之后）
@@ -161,9 +174,26 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     return parseBatch(text);
   }, [tab, filePayload]);
 
-  if (!open) return null;
+  // 批量页解析结果同样 memo 化：App 每秒多次重渲染，避免关闭态下重复全量解析。
+  // ⚠️ 同样必须位于条件 return 之前。
+  const parsed = React.useMemo<TargetEntry[]>(
+    () => (tab === "batch" ? parseBatch(batch) : []),
+    [tab, batch]
+  );
 
-  const parsed = tab === "batch" ? parseBatch(batch) : [];
+  // 当前待添加列表（批量页 = parsed，文件页 = fileEntries，单条页 = []）
+  const currentEntries = tab === "file" ? fileEntries : parsed;
+
+  // 当前待添加列表中与「已有目标」重复的条目（比较规则：host 去首尾空白后转小写）
+  const dupInfo = React.useMemo(() => {
+    const dups: string[] = [];
+    for (const e of currentEntries) {
+      if (existingSet.has(e.host.trim().toLowerCase())) dups.push(e.host);
+    }
+    return { count: dups.length, hosts: dups };
+  }, [currentEntries, existingSet]);
+
+  if (!open) return null;
 
   const doAdd = async (entries: TargetEntry[]) => {
     if (entries.length === 0) {
@@ -201,13 +231,23 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     await doAdd([{ host: h, name: n || h }]);
   };
 
-  const onSubmitBatch = async () => {
-    await doAdd(parsed);
+  /** 批量 / 文件提交入口：存在重复时弹确认框让用户选择，否则直接提交 */
+  const submitEntries = (entries: TargetEntry[], dups: string[]) => {
+    if (entries.length === 0) {
+      setError("请输入至少一个主机名或 IP 地址");
+      return;
+    }
+    if (dups.length === 0) {
+      void doAdd(entries);
+      return;
+    }
+    setError(null);
+    setDupPrompt({ entries, dups });
   };
 
-  const onSubmitFile = async () => {
-    await doAdd(fileEntries);
-  };
+  const onSubmitBatch = () => submitEntries(parsed, dupInfo.hosts);
+
+  const onSubmitFile = () => submitEntries(fileEntries, dupInfo.hosts);
 
   /** 打开文件对话框 → 读取内容 → 解析（不在此处提交） */
   const pickFile = async () => {
@@ -239,13 +279,19 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
       active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500"
     }`;
 
-  // 目标预览块（批量与文件页共用样式）
-  const preview = (list: TargetEntry[]) => (
+  // 目标预览块（批量与文件页共用样式）；dups 为与列表已有目标重复的 host 列表
+  const preview = (list: TargetEntry[], dups: string[]) => (
     <>
       <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
         解析到 <span className="font-mono text-sky-600 dark:text-sky-400">{list.length}</span> 个目标
         <span className="text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
       </div>
+      {dups.length > 0 && (
+        <div className="mt-1 text-[12px] text-amber-600 dark:text-amber-400">
+          ⚠ 其中 {dups.length} 个与列表中已有目标重复：{dups.slice(0, 3).join("、")}
+          {dups.length > 3 ? " 等" : ""}
+        </div>
+      )}
       {list.length > 0 && (
         <div className="mt-2 max-h-28 overflow-auto rounded border border-slate-200 dark:border-slate-700 p-1.5 font-mono text-[11px] text-slate-600 dark:text-slate-300">
           {list.slice(0, 200).map((p, i) => (
@@ -318,7 +364,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
                 placeholder={"每行一个，支持「主机 备注」：\n223.5.5.5 阿里 DNS\n114.114.114.114 114DNS\nwww.baidu.com\n\n# 以 # 开头为注释，可跳过\n# 支持 IP 段展开：\n192.168.1.1-254 内网段\n10.0.0.1-10.0.0.20"}
                 onChange={(e) => setBatch(e.target.value)}
               />
-              {preview(parsed)}
+              {preview(parsed, dupInfo.hosts)}
             </div>
           )}
 
@@ -346,7 +392,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
                 <div className="mt-3 text-[12px] text-sky-600 dark:text-sky-400">正在读取并解析文件…</div>
               )}
 
-              {!fileBusy && filePayload && preview(fileEntries)}
+              {!fileBusy && filePayload && preview(fileEntries, dupInfo.hosts)}
             </div>
           )}
 
@@ -387,6 +433,45 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
           </button>
         </div>
       </div>
+
+      {/* 跨批次重复确认：让用户选择「跳过重复」或「仍然全部添加」（默认推荐跳过） */}
+      <ConfirmDialog
+        open={dupPrompt !== null}
+        title="存在重复目标"
+        danger={false}
+        message={
+          <>
+            <b>{dupPrompt?.dups.length ?? 0}</b> 个目标已在列表中，重复条目会产生重复行。
+            {dupPrompt && dupPrompt.dups.length > 0 && (
+              <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+                例如：{dupPrompt.dups.slice(0, 3).join("、")}
+                {dupPrompt.dups.length > 3 ? " 等" : ""}
+              </div>
+            )}
+          </>
+        }
+        confirmText={
+          dupPrompt && dupPrompt.entries.length - dupPrompt.dups.length === 0
+            ? "无新目标可添加"
+            : `跳过重复，添加 ${dupPrompt ? dupPrompt.entries.length - dupPrompt.dups.length : 0} 个`
+        }
+        confirmDisabled={!!dupPrompt && dupPrompt.entries.length - dupPrompt.dups.length === 0}
+        secondaryText={dupPrompt ? `仍然全部添加 ${dupPrompt.entries.length} 个` : undefined}
+        onSecondary={() => {
+          if (!dupPrompt) return;
+          const all = dupPrompt.entries;
+          setDupPrompt(null);
+          void doAdd(all);
+        }}
+        onConfirm={() => {
+          if (!dupPrompt) return;
+          // 只提交非重复条目；比较规则与检测一致（去首尾空白 + 小写）
+          const unique = dupPrompt.entries.filter((e) => !existingSet.has(e.host.trim().toLowerCase()));
+          setDupPrompt(null);
+          void doAdd(unique);
+        }}
+        onCancel={() => setDupPrompt(null)}
+      />
     </div>
   );
 };

@@ -48,3 +48,21 @@ body {
 .pb-table-row {
   user-select: none;
 }
+
+/* 工具栏横向滚动兜底：极窄宽度下用 4px 细滚动条，避免 10px 大滚动条挤占工具栏高度 */
+.pb-toolbar {
+  scrollbar-width: thin; /* Firefox 兜底 */
+}
+
+.pb-toolbar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.pb-toolbar::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.4);
+  border-radius: 2px;
+}
+
+.pb-toolbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
