@@ -1,4 +1,5 @@
-// 设置对话框：暴露全部 PingSettings，含输入校验，保存后立即生效
+// 设置对话框：分组卡片版式（双列卡片 + 说明右对齐），暴露全部 PingSettings，
+// 含输入校验，保存后立即生效。
 import React from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { EventLevel, PingSettings } from "../types";
@@ -11,25 +12,15 @@ export interface SettingsDialogProps {
   onSaved: () => void;
 }
 
-interface FieldDef {
+/** 纯数字字段定义 */
+interface NumDef {
   key: keyof PingSettings;
   label: string;
-  hint?: string;
-  min?: number;
-  max?: number;
-  step?: number;
-  type: "number" | "bool";
+  hint: string;
+  min: number;
+  max: number;
+  step: number;
 }
-
-const FIELDS: FieldDef[] = [
-  { key: "interval_ms", label: "探测间隔 (ms)", hint: "≥100", min: 100, max: 600000, step: 100, type: "number" },
-  { key: "timeout_ms", label: "超时时间 (ms)", hint: "≥100", min: 100, max: 60000, step: 100, type: "number" },
-  { key: "payload_size", label: "负载大小 (字节)", hint: "0..65500", min: 0, max: 65500, step: 1, type: "number" },
-  { key: "ttl", label: "TTL", hint: "1..255", min: 1, max: 255, step: 1, type: "number" },
-  { key: "history_len", label: "趋势保留点数", hint: "10..600", min: 10, max: 600, step: 10, type: "number" },
-  { key: "beep_on_fail", label: "失败时提示音", hint: "主机由成功转为失败时播放短提示音", type: "bool" },
-  { key: "auto_start", label: "启动时自动开始", hint: "应用启动后自动开始 Ping 已启用目标", type: "bool" },
-];
 
 /** 关闭并发上限后仍保留的硬保护（与 Rust 侧 state::HARD_MAX_THREADS 一致） */
 const HARD_MAX_THREADS = 4096;
@@ -37,17 +28,121 @@ const HARD_MAX_THREADS = 4096;
 const MAX_THREADS_MIN = 1;
 const MAX_THREADS_MAX = 1024;
 
-/** 事件等级三选一（含各档包含的事件说明） */
-const LEVEL_OPTIONS: { value: EventLevel; label: string; desc: string }[] = [
-  { value: "fault", label: "仅故障", desc: "故障 / 无法连通 / 解析失败 / 恢复" },
-  { value: "standard", label: "标准", desc: "故障 + 首次连通 / 开始 / 停止（默认）" },
-  { value: "detail", label: "详细", desc: "标准 + 配置变更" },
+/** 探测参数（卡片内三列网格）
+ *  hint 统一右对齐挂在标签行上，因此必须短（≤ 8 字），长解释放到 note。 */
+const PROBE_FIELDS: NumDef[] = [
+  { key: "interval_ms", label: "探测间隔 (ms)", hint: "≥100", min: 100, max: 600000, step: 100 },
+  { key: "timeout_ms", label: "超时时间 (ms)", hint: "≥100", min: 100, max: 60000, step: 100 },
+  { key: "payload_size", label: "负载大小 (字节)", hint: "0..65500", min: 0, max: 65500, step: 1 },
+  { key: "ttl", label: "TTL", hint: "1..255", min: 1, max: 255, step: 1 },
+  { key: "history_len", label: "趋势保留点数", hint: "10..600", min: 10, max: 600, step: 10 },
+];
+
+/** 事件等级三选一 */
+const LEVEL_OPTIONS: { value: EventLevel; label: string }[] = [
+  { value: "fault", label: "仅故障" },
+  { value: "standard", label: "标准" },
+  { value: "detail", label: "详细" },
 ];
 /** 每主机保留条数三选一 */
 const KEEP_OPTIONS: number[] = [50, 200, 1000];
-/** 设置内的小按钮样式（禁止折行 / 压缩） */
+
+/* ------------------------------- 样式常量 ------------------------------- */
+
+/** 卡片：白底 + 细边框，浮在浅灰底上 */
+const card = "rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
+/** 数字输入框：先前的 h-7 px-2 与框内数字过挤，统一放松为 h-8 px-3 */
+const inputCls =
+  "w-full h-8 px-3 rounded-md border bg-slate-50 dark:bg-slate-800/60 border-slate-300 dark:border-slate-600 text-[13px] text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:border-sky-500 disabled:opacity-50 disabled:cursor-not-allowed";
+/** 卡片内小按钮（禁止折行 / 压缩） */
 const smallBtn =
-  "h-7 px-2 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed";
+  "h-8 px-3 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[12px] text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed";
+/** 复选框 / 单选 */
+const checkCls = "accent-emerald-600 w-4 h-4 shrink-0";
+const radioCls = "accent-sky-600 w-4 h-4 shrink-0";
+/** 字段标签行（标签左、取值范围右对齐） */
+const labelRow = "flex items-baseline justify-between gap-2 mb-1.5 min-w-0";
+const labelCls = "text-[12px] text-slate-600 dark:text-slate-300 whitespace-nowrap";
+const labelHint = "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0";
+/** 控件下方的补充说明（仅长解释使用），统一挂在控件下方、左边缘与控件对齐 */
+const noteCls = "mt-1.5 text-[11px] leading-snug text-slate-400 dark:text-slate-500";
+
+/* ------------------------------- 小组件 ------------------------------- */
+
+/** 分组卡片容器：左侧一道强调条 + 标题 + 可选副说明；span=2 时横跨双列 */
+const Card: React.FC<{ title: string; sub?: string; span?: 1 | 2; children: React.ReactNode }> = ({
+  title,
+  sub,
+  span,
+  children,
+}) => (
+  <section
+    className={`${card} px-4 py-3`}
+    style={span === 2 ? { gridColumn: "span 2 / span 2" } : undefined}
+  >
+    <div className="flex items-center gap-2 mb-3">
+      <span className="w-[3px] h-3.5 rounded-full bg-sky-500 shrink-0" />
+      <h3 className="text-[13px] font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
+        {title}
+      </h3>
+      {sub && (
+        <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0">{sub}</span>
+      )}
+    </div>
+    {children}
+  </section>
+);
+
+/** 网格字段：标签行（标签左 / 取值范围右）+ 控件 + 可选补充说明 */
+const Field: React.FC<{
+  label?: string;
+  hint?: string;
+  note?: string;
+  span?: number;
+  children: React.ReactNode;
+}> = ({ label, hint, note, span, children }) => (
+  <div
+    className="min-w-0"
+    style={span ? { gridColumn: `span ${span} / span ${span}` } : undefined}
+  >
+    {(label || hint) && (
+      <div className={labelRow}>
+        {label && <span className={labelCls} title={label}>{label}</span>}
+        {hint && <span className={labelHint}>{hint}</span>}
+      </div>
+    )}
+    {children}
+    {note && <div className={noteCls}>{note}</div>}
+  </div>
+);
+
+/** 行内开关：复选框 + 状态文字（与输入框等高 h-8，保证同行视觉基线一致） */
+const Toggle: React.FC<{
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  onText?: string;
+  offText?: string;
+}> = ({ checked, onChange, disabled, onText = "已开启", offText = "已关闭" }) => (
+  <label
+    className={`flex items-center gap-2 h-8 select-none min-w-0 ${
+      disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+    }`}
+  >
+    <input
+      type="checkbox"
+      className={checkCls}
+      checked={checked}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.checked)}
+    />
+    <span className="text-[13px] text-slate-700 dark:text-slate-200 whitespace-nowrap truncate">
+      {checked ? onText : offText}
+    </span>
+  </label>
+);
+
+/* ------------------------------- 主组件 ------------------------------- */
 
 const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose, onSaved }) => {
   const [draft, setDraft] = React.useState<PingSettings>(settings);
@@ -126,220 +221,221 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-[560px] max-h-[86vh] flex flex-col rounded-lg shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
-        <div className="px-4 h-11 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
-          <div className="font-semibold text-slate-800 dark:text-slate-100">设置</div>
-          <button className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" onClick={onClose}>
-            ✕
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-[900px] min-w-0 max-h-[86vh] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
+        {/* 标题区（同样是一张卡片）：标题 + 副标题 + 配置文件路径 */}
+        <div className="shrink-0 px-3 pt-3">
+          <div className={`${card} px-4 py-2.5`}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold leading-6 text-slate-800 dark:text-slate-100">
+                  设置
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  探测参数、并发上限与事件日志；保存后立即生效
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="关闭"
+                title="关闭"
+                className="-mr-1 -mt-0.5 w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-slate-400 transition-colors hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+                onClick={onClose}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-1 flex items-baseline gap-1.5 min-w-0 text-[11px]">
+              <span className="text-slate-400 dark:text-slate-500 shrink-0">配置文件</span>
+              <span
+                className="font-mono text-slate-500 dark:text-slate-400 truncate"
+                title={configPath || "（读取中…）"}
+              >
+                {configPath || "（读取中…）"}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className="px-4 py-3 flex-1 overflow-auto">
-          <table className="w-full">
-            <tbody>
-              {FIELDS.map((f) => (
-                <tr key={String(f.key)} className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">{f.label}</td>
-                  <td className="py-1.5">
-                    {f.type === "number" ? (
-                      <input
-                        type="number"
-                        className="w-32 h-7 px-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                        value={String(draft[f.key] as number)}
-                        min={f.min}
-                        max={f.max}
-                        step={f.step}
-                        onChange={(e) => setNum(f.key, e.target.value)}
-                      />
-                    ) : (
-                      <input
-                        type="checkbox"
-                        className="accent-emerald-600 w-4 h-4"
-                        checked={Boolean(draft[f.key])}
-                        onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.checked }))}
-                      />
-                    )}
-                    {f.hint && <span className="ml-2 text-[11px] text-slate-400">{f.hint}</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* 并发线程数：开关 + 数字组合行 + 性能影响说明 */}
-          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-            <table className="w-full">
-              <tbody>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">启用线程数上限</td>
-                  <td className="py-1.5">
-                    <input
-                      type="checkbox"
-                      className="accent-emerald-600 w-4 h-4"
-                      checked={draft.limit_max_threads}
-                      onChange={(e) => setDraft((d) => ({ ...d, limit_max_threads: e.target.checked }))}
-                    />
-                    <span className="ml-2 text-[11px] text-slate-400">
-                      关闭后不再按「最大线程数」拦截，仅保留 {HARD_MAX_THREADS} 硬保护
-                    </span>
-                  </td>
-                </tr>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">最大线程数</td>
-                  <td className="py-1.5">
+        {/* 卡片流（唯一滚动区）：双列卡片，宽卡片横跨两列 */}
+        <div className="flex-1 overflow-auto px-3 py-3">
+          <div className="grid grid-cols-2 gap-3 items-start">
+            <Card title="探测" span={2}>
+              <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+                {PROBE_FIELDS.map((f) => (
+                  <Field key={String(f.key)} label={f.label} hint={f.hint}>
                     <input
                       type="number"
-                      className="w-32 h-7 px-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                      value={String(draft.max_threads)}
-                      min={MAX_THREADS_MIN}
-                      max={MAX_THREADS_MAX}
-                      step={1}
-                      disabled={!draft.limit_max_threads}
-                      onChange={(e) => setNum("max_threads", e.target.value)}
+                      className={inputCls}
+                      value={String(draft[f.key] as number)}
+                      min={f.min}
+                      max={f.max}
+                      step={f.step}
+                      onChange={(e) => setNum(f.key, e.target.value)}
                     />
-                    <span className="ml-2 text-[11px] text-slate-400">
-                      {MAX_THREADS_MIN}..{MAX_THREADS_MAX}
-                      {!draft.limit_max_threads && "（当前未启用，仅记录）"}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="mt-1 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-              每台主机会占用 1 个系统线程 + 1 个 ICMP 句柄。开启上限时按「最大线程数」拦截，可防止误加大量主机拖慢系统；
-              关闭后不再限制（仅保留 {HARD_MAX_THREADS} 硬保护）——200 台以内影响很小，500 台以上线程调度、内存与界面刷新开销会明显上升，
-              1000 台以上建议保持开启并分批启动。
-            </p>
-          </div>
+                  </Field>
+                ))}
+              </div>
+            </Card>
 
-          {/* 事件日志分组 */}
-          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-            <div className="mb-2 font-medium text-slate-700 dark:text-slate-200">事件日志</div>
-            <table className="w-full">
-              <tbody>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">启用事件日志</td>
-                  <td className="py-1.5">
-                    <input
-                      type="checkbox"
-                      className="accent-emerald-600 w-4 h-4"
-                      checked={draft.events_on}
-                      onChange={(e) => setDraft((d) => ({ ...d, events_on: e.target.checked }))}
-                    />
-                    <span className="ml-2 text-[11px] text-slate-400 whitespace-nowrap">
-                      总开关，关闭后不再产生任何事件
-                    </span>
-                  </td>
-                </tr>
-                <tr className="align-top">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">事件等级</td>
-                  <td className="py-1.5">
-                    <div className="flex flex-col gap-1">
-                      {LEVEL_OPTIONS.map((o) => (
-                        <label key={o.value} className="flex items-start gap-1.5 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="events_level"
-                            className="accent-sky-600 w-4 h-4 mt-0.5"
-                            checked={draft.events_level === o.value}
-                            onChange={() => setDraft((d) => ({ ...d, events_level: o.value }))}
-                          />
-                          <span className="text-slate-700 dark:text-slate-200 whitespace-nowrap">{o.label}</span>
-                          <span className="text-[11px] text-slate-400">{o.desc}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">保存事件到文件</td>
-                  <td className="py-1.5">
-                    <input
-                      type="checkbox"
-                      className="accent-emerald-600 w-4 h-4"
-                      checked={draft.events_persist}
-                      onChange={(e) => setDraft((d) => ({ ...d, events_persist: e.target.checked }))}
-                    />
-                    <span className="ml-2 text-[11px] text-slate-400 whitespace-nowrap">
-                      默认保存到配置目录下的 pingboard-events.jsonl
-                    </span>
-                  </td>
-                </tr>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">事件保存目录</td>
-                  <td className="py-1.5">
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="flex-1 min-w-0 h-7 px-2 rounded border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 leading-7 truncate text-[12px]"
-                        title={draft.events_dir ?? "（默认：配置目录）"}
-                      >
-                        {draft.events_dir ?? "（默认：配置目录）"}
-                      </div>
-                      <button type="button" className={smallBtn} onClick={chooseDir}>
-                        选择…
-                      </button>
-                      <button
-                        type="button"
-                        className={smallBtn}
-                        onClick={() => setDraft((d) => ({ ...d, events_dir: null }))}
-                        disabled={draft.events_dir === null}
-                      >
-                        恢复默认
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                <tr className="align-middle">
-                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">每主机保留条数</td>
-                  <td className="py-1.5">
-                    <div className="flex items-center gap-3">
-                      {KEEP_OPTIONS.map((k) => (
-                        <label key={k} className="flex items-center gap-1 cursor-pointer">
-                          <input
-                            type="radio"
-                            name="events_keep"
-                            className="accent-sky-600 w-4 h-4"
-                            checked={draft.events_keep === k}
-                            onChange={() => setDraft((d) => ({ ...d, events_keep: k }))}
-                          />
-                          <span className="text-slate-700 dark:text-slate-200">{k}</span>
-                        </label>
-                      ))}
-                      <span className="text-[11px] text-slate-400 whitespace-nowrap">条/主机</span>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <p className="mt-1 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
-              事件在探测状态迁移时产生，按等级过滤展示；「仅故障」最简洁，「详细」额外记录配置变更。
-              历史文件在应用启动时读回（每主机只取最近「保留条数」条）。
-            </p>
-          </div>
+            <Card title="界面与行为">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <Field label="失败时提示音" hint="成功转失败时">
+                  <Toggle
+                    checked={draft.beep_on_fail}
+                    onChange={(v) => setDraft((d) => ({ ...d, beep_on_fail: v }))}
+                  />
+                </Field>
+                <Field label="启动时自动开始">
+                  <Toggle
+                    checked={draft.auto_start}
+                    onChange={(v) => setDraft((d) => ({ ...d, auto_start: v }))}
+                  />
+                </Field>
+              </div>
+            </Card>
 
-          {error && <div className="mt-2 text-red-600 dark:text-red-400">{error}</div>}
+            <Card title="并发">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <Field label="启用线程数上限" hint="关后不拦截">
+                  <Toggle
+                    checked={draft.limit_max_threads}
+                    onChange={(v) => setDraft((d) => ({ ...d, limit_max_threads: v }))}
+                    onText="已启用"
+                    offText="未启用"
+                  />
+                </Field>
+                <Field
+                  label="最大线程数"
+                  hint={`${MAX_THREADS_MIN}..${MAX_THREADS_MAX}`}
+                  note={draft.limit_max_threads ? undefined : "未启用上限，此处仅记录"}
+                >
+                  <input
+                    type="number"
+                    className={inputCls}
+                    value={String(draft.max_threads)}
+                    min={MAX_THREADS_MIN}
+                    max={MAX_THREADS_MAX}
+                    step={1}
+                    disabled={!draft.limit_max_threads}
+                    onChange={(e) => setNum("max_threads", e.target.value)}
+                  />
+                </Field>
+                <Field span={2}>
+                  <p className="text-[11px] leading-snug text-slate-400 dark:text-slate-500">
+                    每台主机占用 1 个系统线程 + 1 个 ICMP 句柄。500 台以上线程调度与内存开销会明显上升，
+                    建议保持上限开启并分批启动；关闭后仅保留 {HARD_MAX_THREADS} 硬保护。
+                  </p>
+                </Field>
+              </div>
+            </Card>
 
-          <div className="mt-4 pt-2 border-t border-slate-200 dark:border-slate-700 text-[11px] text-slate-400 break-all">
-            配置文件：{configPath || "（读取中…）"}
+            <Card title="事件日志" sub="记录每台主机的故障与恢复" span={2}>
+              <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="启用事件日志" hint="总开关">
+                  <Toggle
+                    checked={draft.events_on}
+                    onChange={(v) => setDraft((d) => ({ ...d, events_on: v }))}
+                  />
+                </Field>
+                <Field label="保存事件到文件" hint="写入 jsonl">
+                  <Toggle
+                    checked={draft.events_persist}
+                    onChange={(v) => setDraft((d) => ({ ...d, events_persist: v }))}
+                  />
+                </Field>
+                <Field label="每主机保留条数" hint="超出丢弃最旧">
+                  <div className="flex items-center gap-4 h-8">
+                    {KEEP_OPTIONS.map((k) => (
+                      <label key={k} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="events_keep"
+                          className={radioCls}
+                          checked={draft.events_keep === k}
+                          onChange={() => setDraft((d) => ({ ...d, events_keep: k }))}
+                        />
+                        <span className="text-[13px] text-slate-700 dark:text-slate-200">{k}</span>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+
+                <Field
+                  span={3}
+                  label="事件等级"
+                  note="仅故障 = 故障 / 无法连通 / 解析失败 / 恢复；标准另含首次连通 / 开始 / 停止；详细另含配置变更。"
+                >
+                  <div className="flex items-center gap-6 h-8">
+                    {LEVEL_OPTIONS.map((o) => (
+                      <label key={o.value} className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="events_level"
+                          className={radioCls}
+                          checked={draft.events_level === o.value}
+                          onChange={() => setDraft((d) => ({ ...d, events_level: o.value }))}
+                        />
+                        <span className="text-[13px] text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                          {o.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+
+                <Field
+                  span={3}
+                  label="事件保存目录"
+                  note="默认存在配置目录下（pingboard-events.jsonl）；历史文件在应用启动时读回，每主机只取最近「保留条数」条。"
+                >
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`${inputCls} flex-1 min-w-0 flex items-center cursor-default`}
+                      title={draft.events_dir ?? "（默认：配置目录）"}
+                    >
+                      <span className="truncate">{draft.events_dir ?? "（默认：配置目录）"}</span>
+                    </div>
+                    <button type="button" className={smallBtn} onClick={chooseDir}>
+                      选择…
+                    </button>
+                    <button
+                      type="button"
+                      className={smallBtn}
+                      onClick={() => setDraft((d) => ({ ...d, events_dir: null }))}
+                      disabled={draft.events_dir === null}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                </Field>
+              </div>
+            </Card>
           </div>
         </div>
 
-        <div className="px-4 h-12 flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700">
-          <button
-            className="px-3 h-7 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700"
-            onClick={() => setDraft({ ...settings })}
-            disabled={busy}
-          >
-            还原
-          </button>
-          <button
-            className="px-3 h-7 rounded bg-sky-600 hover:bg-sky-700 text-white disabled:opacity-50"
-            onClick={save}
-            disabled={busy}
-          >
-            {busy ? "保存中…" : "保存并应用"}
-          </button>
+        {/* 底部操作栏（卡片）：左侧承载错误提示，右侧两个按钮 */}
+        <div className="shrink-0 px-3 pb-3">
+          <div className={`${card} px-4 py-2.5 flex items-center justify-between gap-3`}>
+            <div
+              className="min-w-0 text-[12px] text-red-600 dark:text-red-400 truncate"
+              title={error ?? ""}
+            >
+              {error ?? ""}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button className={smallBtn} onClick={() => setDraft({ ...settings })} disabled={busy}>
+                还原
+              </button>
+              <button
+                className="h-8 px-4 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[12px] whitespace-nowrap shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={save}
+                disabled={busy}
+              >
+                {busy ? "保存中…" : "保存并应用"}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
