@@ -1,5 +1,7 @@
 # PingBoard — 多主机 Ping 监视器
 
+<img src="docs/app-icon.png" width="96" alt="PingBoard 图标">
+
 一款面向 Windows 平台的多主机并行 Ping 监视工具。
 使用 **Rust + Tauri 2 + React 18 + TypeScript + Tailwind CSS** 开发，界面语言为简体中文。
 
@@ -40,9 +42,9 @@
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.1.0_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.0_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.8 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.1.0_x64-setup-offline.exe`（**完整离线版**） | 217.8 MB（208 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
+| `PingBoard_1.1.3_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.3_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.3_x64-setup-offline.exe`（**完整离线版**） | 217.9 MB（207.8 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
 
 > 三者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
 > - 在线引导版 = `downloadBootstrapper`：安装时若检测到缺少 WebView2，才去下载约 1.8 MB 的引导程序；
@@ -61,8 +63,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.1.0_x64-setup.exe /S                     :: 安装到默认目录
-PingBoard_1.1.0_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.1.3_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.3_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                     :: 静默卸载
 ```
 
@@ -87,13 +89,16 @@ uninstall.exe /S                                     :: 静默卸载
 ### 界面
 - 顶部工具栏：添加主机、开始/停止全部、清空统计、**清空列表**、设置、导出（CSV / TXT / HTML）、搜索、主题切换、状态指示灯。
 - 选中目标后工具栏额外出现：**开始选中 / 停止选中 / 删除选中**（可对列表内的部分目标单独启停）。
-- 中部主表格：选择 / 启用 / 备注名 / 主机名 / IP 地址 / 状态 / 延迟 / 平均 / 最小 / 最大 /
-  丢包率 / 成功·失败 / 趋势 sparkline / 最后成功时间。支持点击表头排序、多选（`Ctrl` / `Shift` + 复选框）、
+- 中部主表格：选择 / 备注名 / 主机名 / IP 地址 / 状态 / 延迟 / 平均 / 最小 / 最大 /
+  丢包率 / 成功·失败 / 趋势 sparkline / 最后成功时间（共 **13 列**）。支持点击表头排序、多选（`Ctrl` / `Shift` + 复选框）、
   **表头全选（仅作用于当前搜索过滤后的可见列表）**、`Delete` 键删除。
-- 右侧详情面板：最近 60 次延迟**折线图（纯 SVG 手写）** + 完整统计 + 失败/恢复事件日志。
+- 右侧详情面板：标题栏带**「监控」开关**（决定该目标是否纳入「开始全部」与开机自动启动）+
+  最近 60 次延迟**折线图（纯 SVG 手写）** + 完整统计 + 失败/恢复事件日志。
 - 底部状态栏：运行状态、主机数、活跃线程数、总发包/收包/丢包率、运行时长、最后刷新时间。
 - 浅色 / 深色主题，选择持久化到 `localStorage`（默认浅色）。
 - 行着色约定：**绿 = 正常，红 = 失败**。
+- 状态文字配色：**「运行中」为绿色（`emerald-600`）**、**「已停止」为灰色（`slate-400`）**，
+  在工具栏、底部状态栏、详情面板「线程」三处一致。
 
 ### 添加主机
 - 单个添加：主机名/IP + 备注名。
@@ -163,18 +168,39 @@ cargo check
 cargo test
 ```
 
-### 生成图标（可选）
+### 更换图标
+
+图标的设计源是手写矢量 `docs/app-icon.svg`（深蓝底 + 翡翠绿雷达同心圆），
+另有一版白底备选 `docs/app-icon-alt-white.svg`。改图标只需改 SVG，再重新渲染并生成全套尺寸：
+
 ```bash
-node scripts/gen-icon.mjs assets/app-icon.png   # 生成 1024x1024 源图
-npx tauri icon assets/app-icon.png              # 生成全套平台图标
+# 1) SVG → 1024x1024 透明 PNG（借用 Edge 无头渲染，无需额外依赖）
+msedge --headless=new --disable-gpu --hide-scrollbars \
+       --default-background-color=00000000 --force-device-scale-factor=1 \
+       --window-size=1024,1024 --screenshot=docs/app-icon.png "file:///$PWD/docs/app-icon.svg"
+
+# 2) 生成全套平台图标（Windows ico 含 16/24/32/48/64/256 + icns + iOS/Android）
+npx tauri icon docs/app-icon.png
 ```
+
+> `--default-background-color=00000000` 是拿到**透明背景**的关键，漏掉会渲染成白底。
+>
+> 改完需手动把 Android 自适应图标背景色设回 `#12203A`
+> （`src-tauri/icons/android/values/ic_launcher_background.xml`）——
+> `npx tauri icon` 会把它重置为 Tauri 默认的白色。
+>
+> **定稿前务必看 16px / 24px 的真实效果**：细描边圆环在小尺寸下会被抗锯齿整圈吃掉，
+> 只剩一个孤立的中心点。本图标因此改用 `fill-rule="evenodd"` 的**实心环带**而非细描边。
+> 各尺寸放大对照见 `docs/app-icon-sizes.png`。
+
+> `scripts/gen-icon.mjs` 与 `assets/app-icon.png` 是 v1.0.0 时期的占位图标生成脚本，已被上面的流程取代，保留仅为追溯。
 
 ### 打包 Windows 安装包（NSIS）
 ```bash
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.0_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.3_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
@@ -185,13 +211,18 @@ npx tauri build --bundles nsis
 | `webviewInstallMode.type` | 产物体积 | 是否需要联网 | 说明 |
 |---|---|---|---|
 | `downloadBootstrapper`（默认） | ≈ 2.0 MB | 缺 WebView2 时需要 | 安装时才下载约 1.8 MB 引导程序 |
-| `embedBootstrapper` | ≈ 3.8 MB | 缺 WebView2 时需要 | 引导程序内置，安装包 +≈1.8 MB |
-| `offlineInstaller` | 217.8 MB | **不需要** | 内置 WebView2 离线安装程序（213 MB），**构建时需联网下载一次** |
+| `embedBootstrapper` | ≈ 3.7 MB | 缺 WebView2 时需要 | 引导程序内置，安装包 +≈1.8 MB |
+| `offlineInstaller` | 217.9 MB | **不需要** | 内置 WebView2 离线安装程序（213 MB），**构建时需联网下载一次** |
 
 ```jsonc
 // src-tauri/tauri.conf.json
 "bundle": {
   "windows": {
+    "nsis": {
+      // 安装程序 / 卸载程序自身显示的图标；不设则用 NSIS 自带的通用图标
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico"
+    },
     "webviewInstallMode": { "type": "downloadBootstrapper" }  // 或 embedBootstrapper / offlineInstaller
   }
 }
@@ -209,8 +240,14 @@ pinginfo/
 ├─ README.md
 ├─ package.json / vite.config.ts / tsconfig.json / tsconfig.node.json
 ├─ tailwind.config.js / postcss.config.js / index.html
-├─ scripts/gen-icon.mjs          # 纯 Node 图标生成脚本
-├─ assets/app-icon.png           # 图标源图（生成物）
+├─ docs/                         # 设计源与文档图
+│  ├─ app-icon.svg               # 应用图标矢量源（在用）
+│  ├─ app-icon.png               # 1024x1024 透明渲染图
+│  ├─ app-icon-sizes.png         # 各尺寸放大对照（16/24/32/48/64）
+│  ├─ app-icon-alt-white.svg/.png# 白底备选版
+│  └─ screenshot.png             # 界面截图
+├─ scripts/gen-icon.mjs          # v1.0.0 时期的占位图标脚本（已被 docs/app-icon.svg 流程取代）
+├─ assets/app-icon.png           # 同上，历史遗留
 ├─ src/                          # 前端（React + TS）
 │  ├─ main.tsx / App.tsx / styles.css / types.ts
 │  ├─ lib/api.ts                 # invoke 封装
@@ -222,6 +259,7 @@ pinginfo/
 └─ src-tauri/                    # 后端（Rust）
    ├─ Cargo.toml / build.rs / tauri.conf.json
    ├─ capabilities/default.json
+   ├─ icons/                     # 全套平台图标（由 docs/app-icon.png 生成）
    └─ src/
       ├─ main.rs / lib.rs
       ├─ model.rs                # 数据结构（serde）
@@ -250,3 +288,51 @@ pinginfo/
 - ICMP 主路径仅支持 IPv4；IPv6 目标自动走 `ping.exe -6` 降级路径。
 - 降级路径（`ping.exe`）使用系统默认 32 字节负载，`payload_size` 设置对降级路径不生效。
 - 导出报表中的「最后成功时间」为 UTC 时间。
+
+---
+
+## 更新日志
+
+### v1.1.3 — 全新应用图标
+
+- **更换应用图标**：由 Tauri 脚手架默认图标改为「深蓝底 + 翡翠绿雷达同心圆」，
+  最外环与图标边缘相切，右上角一道柔和扫描扇区 + 环上一个目标亮点。
+  全套 52 个尺寸（Windows `ico` 含 16/24/32/48/64/256、macOS `icns`、iOS / Android）全部重新生成。
+- **安装程序与卸载程序也随之上新图标**（新增 `bundle.windows.nsis.installerIcon` / `uninstallerIcon`）——
+  此前安装包显示的是一张 NSIS 自带的通用图标，与应用图标并不一致。
+- 矢量设计源随仓库提供：`docs/app-icon.svg`（在用）、`docs/app-icon-alt-white.svg`（白底备选）、
+  `docs/app-icon-sizes.png`（各尺寸放大对照）。
+
+### v1.1.2 — 试用反馈修复
+
+- **修复：设置项被周期性重置。** 设置对话框的初始化逻辑依赖了每 500 ms 刷新一次的 `settings` 对象，
+  导致「启用线程数上限」等勾选在半秒后被冲掉，表现为「无法取消选择」「改了没反应」。
+  改为只在对话框打开的那一瞬初始化草稿。
+- **修复：停止缓慢。** 原实现逐个等待工作线程退出（总耗时 = 所有目标退出时间之和），
+  且界面状态要等全部退出后才更新，表现为「要点好几下、等十几二十秒」。
+  改为「置停止标志 → 立即更新界面 → 句柄交给后台线程回收」。
+  实测 3 台规模停止耗时 205 / 282 / 368 ms，数百台规模也在一个刷新周期（500 ms）内完成。
+  - 该改动曾引入一处新竞态（快速「停止 → 立即开始」时短暂显示已停止），
+    已通过线程身份比对（`Arc::ptr_eq`）修复，72 个采样点复验全 0。
+- **合并重复列**：「选择」列与「启用」列功能重叠，删除表格中的「启用」列（14 → **13 列**），
+  启用/监控开关移至右侧详情面板标题栏，改为 `role="switch"` 开关。
+- **状态文字配色**：「运行中」绿色（`emerald-600`）、「已停止」灰色（`slate-400`），
+  工具栏 / 底部状态栏 / 详情面板「线程」三处一致。
+
+### v1.1.1 — 细节修复
+
+- 修复工具栏在选中主机后折行的问题，并新增重复目标与累加超限提示。
+- 未单独发版，改动并入 v1.1.3。
+
+### v1.1.0 — 文件导入 / 选择列 / 并发上限开关
+
+- 新增**从文件导入主机**：支持 `.txt` / `.csv` / `.xlsx` / `.xls` / `.xlsm` / `.ods`，
+  兼容 UTF-8 / UTF-8 BOM / GBK 编码，导入前显示目标预览。
+- 新增**选择列**与「开始选中 / 停止选中 / 删除选中」批量操作，表头支持全选（仅作用于搜索过滤后的可见列表）。
+- 「启用线程数上限」改为可选开关，关闭后不再按 `max_threads` 拦截（仅保留 4096 硬保护）。
+- 首次同版发布三种 WebView2 打包变体。
+
+### v1.0.0 — 首个版本
+
+- 多主机并行 Ping 监视（Win32 ICMP API，普通权限可运行）、延迟趋势图、
+  导出 CSV / TXT / HTML、浅色 / 深色主题。
