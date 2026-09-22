@@ -118,6 +118,8 @@ impl AppState {
             loss_pct: stats::loss_pct(total_sent, total_failed),
             started_at,
             updated_at: now_ms(),
+            // 本次运行的会话标识（启动时刻），前端用于区分「本次运行」与历史批次
+            session: self.inner.events.session(),
             // 增量事件：取走并清空 pending，空闲时为 []
             events: self.inner.events.drain_pending(),
         }

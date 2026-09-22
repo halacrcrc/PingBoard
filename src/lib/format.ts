@@ -21,6 +21,14 @@ export function fmtTime(ts: number | null | undefined): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** 将纪元毫秒格式化为 MM-DD HH:MM:SS（跨会话事件用，便于看出是哪一批） */
+export function fmtDateTimeShort(ts: number | null | undefined): string {
+  if (!ts) return "-";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${fmtTime(ts)}`;
+}
+
 /** 将毫秒时长为 1h2m3s / 2m3s / 3s 形式 */
 export function fmtDuration(ms: number | null | undefined): string {
   if (!ms || ms < 0) return "0s";

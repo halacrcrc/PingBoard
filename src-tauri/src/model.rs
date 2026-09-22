@@ -179,6 +179,9 @@ pub struct Snapshot {
     pub loss_pct: f64,
     pub started_at: Option<u64>,
     pub updated_at: u64,
+    /// 本次运行的会话标识（= 进程启动时刻，纪元毫秒）。
+    /// 前端用它判断日志行是否属于「本次运行」，从而给旧会话加上日期前缀。
+    pub session: u64,
     /// 自上次快照以来新增的事件（增量；始终序列化，空闲为 `[]`）
     pub events: Vec<crate::events::LogEvent>,
 }

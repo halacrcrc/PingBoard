@@ -1,13 +1,15 @@
 // 详情面板：选中主机的延迟折线图、完整统计与最近日志
 import React from "react";
 import type { LogEvent, TargetState } from "../types";
-import { eventColorClass, fmtMs, fmtPct, fmtTime, statusLabel } from "../lib/format";
+import { eventColorClass, fmtDateTimeShort, fmtMs, fmtPct, fmtTime, statusLabel } from "../lib/format";
 import LatencyChart from "./LatencyChart";
 
 export interface DetailPanelProps {
   target: TargetState | null;
   /** 已按当前事件等级过滤后的日志（新→旧） */
   logs: LogEvent[];
+  /** 本次运行的会话标识（= 进程启动时刻）；用于给「上一次运行」的日志加上日期前缀 */
+  session: number;
   /** 全局事件总开关（关闭时单主机开关不产生事件） */
   globalEventsOn: boolean;
   /** 切换目标的监控（启用）状态：参与「开始全部」与开机自动启动 */
@@ -52,6 +54,7 @@ const chipDanger =
 const DetailPanel: React.FC<DetailPanelProps> = ({
   target,
   logs,
+  session,
   globalEventsOn,
   onToggleEnabled,
   onToggleEvents,
@@ -68,6 +71,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   }
 
   const recording = globalEventsOn && target.events_on;
+  /** 列表里是否混有「上一次运行」留下的日志（这些行的时间会带月-日前缀） */
+  const hasHistory = logs.some((l) => l.session !== session);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -154,6 +159,14 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
                 最近日志（{logs.length}）
               </span>
+              {hasHistory && (
+                <span
+                  className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0"
+                  title="包含上一次运行记录的事件，其时间显示为「月-日 时:分:秒」"
+                >
+                  含历史
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -192,12 +205,26 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               </div>
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
-                {logs.map((l) => (
-                  <li key={l.seq} className="px-2 py-1 flex gap-2">
-                    <span className="text-slate-400 shrink-0">{fmtTime(l.ts)}</span>
-                    <span className={`whitespace-nowrap ${eventColorClass(l.kind)}`}>{l.text}</span>
-                  </li>
-                ))}
+                {logs.map((l) => {
+                  const current = l.session === session;
+                  return (
+                    <li key={`${l.session}-${l.seq}`} className="px-2 py-1 flex gap-2">
+                      <span
+                        className="text-slate-400 shrink-0"
+                        title={
+                          current
+                            ? undefined
+                            : l.session > 0
+                              ? `上一次运行（${fmtDateTimeShort(l.session)} 启动）记录`
+                              : "更早版本记录的事件"
+                        }
+                      >
+                        {current ? fmtTime(l.ts) : fmtDateTimeShort(l.ts)}
+                      </span>
+                      <span className={`whitespace-nowrap ${eventColorClass(l.kind)}`}>{l.text}</span>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

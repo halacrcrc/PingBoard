@@ -169,8 +169,18 @@ pub enum FailSource {
 /// 单条事件（JSONL 一行）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogEvent {
-    /// 会话内单调自增序号，用于快照去重 / 排序
+    /// 会话内单调自增序号，用于快照去重 / 排序。
+    ///
+    /// ⚠️ 口径是**「本次运行会话内单调」**，不是全局唯一 —— 每次启动由 `load_hosts`
+    /// 把计数器顶到读回历史的最大 seq 之上，因此同一文件内 seq 仍严格递增；
+    /// 但跨会话比较无意义，要切批次请用 `session`。
     pub seq: u64,
+    /// 本事件所属运行批次的标识 = 该次进程启动时刻（纪元毫秒）。
+    ///
+    /// 每次启动一个新值（单调递增，天然可排序），写进该次运行产生的每一条事件。
+    /// 用于在单一文件内区分「哪一次运行」，导出 CSV 时渲染为本地时间。
+    /// 该字段出现之前的旧行反序列化为 `0`（导出时显示为空）。
+    pub session: u64,
     /// 纪元毫秒
     pub ts: u64,
     /// 运行时目标 id（实时路由用）
@@ -196,6 +206,9 @@ impl<'de> Deserialize<'de> for LogEvent {
         #[derive(Deserialize)]
         struct Raw {
             seq: u64,
+            /// 旧行（本字段引入之前写的）缺此项 → 0，代表「更早的运行」
+            #[serde(default)]
+            session: u64,
             #[serde(default)]
             ts: u64,
             #[serde(default)]
@@ -216,6 +229,7 @@ impl<'de> Deserialize<'de> for LogEvent {
             .unwrap_or_else(|| EventLevel::for_kind(raw.kind));
         Ok(LogEvent {
             seq: raw.seq,
+            session: raw.session,
             ts: raw.ts,
             target_id: raw.target_id,
             target_name: raw.target_name,
@@ -299,6 +313,8 @@ enum WriterMsg {
 
 /// 事件存储：增量 pending + 每主机内存环 + 单调 seq + JSONL 写线程。
 pub struct EventStore {
+    /// 本次运行的会话标识（启动时刻，纪元毫秒）；创建后不变
+    session: u64,
     /// 单调自增序号
     seq: AtomicU64,
     /// 每主机内存环 cap（= 详情面板展示上限）
@@ -316,11 +332,20 @@ pub struct EventStore {
 }
 
 impl EventStore {
-    /// 创建事件存储并启动写线程
+    /// 创建事件存储并启动写线程。
+    ///
+    /// 会话标识取**本次进程启动时刻**（纪元毫秒）：同一毫秒内不可能启动两次进程，
+    /// 因此它在单一事件文件内天然唯一且单调递增，可直接用于排序与分组。
     pub fn new() -> Self {
+        Self::with_session(crate::state::now_ms())
+    }
+
+    /// 指定会话标识构造（测试注入用；生产走 `new()`）
+    pub fn with_session(session: u64) -> Self {
         let (tx, rx) = mpsc::channel::<WriterMsg>();
         spawn_writer(rx);
         Self {
+            session,
             seq: AtomicU64::new(0),
             keep: AtomicUsize::new(DEFAULT_EVENTS_KEEP),
             persist_enabled: AtomicBool::new(false),
@@ -329,6 +354,11 @@ impl EventStore {
             per_host: Mutex::new(HashMap::new()),
             tx,
         }
+    }
+
+    /// 本次运行的会话标识（启动时刻，纪元毫秒）
+    pub fn session(&self) -> u64 {
+        self.session
     }
 
     /// 设置每主机内存环 cap（来自 `events_keep`）
@@ -358,6 +388,7 @@ impl EventStore {
         let seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
         let event = LogEvent {
             seq,
+            session: self.session,
             ts: crate::state::now_ms(),
             target_id: id,
             target_name: name.to_string(),
@@ -597,7 +628,10 @@ impl EventWriter {
         self.open_file();
     }
 
-    /// 清空某主机：读整文件 → 过滤该主机 → 写临时文件 → 原子替换
+    /// 清空某主机：读整文件 → 过滤该主机 → 写临时文件 → 原子替换。
+    ///
+    /// ⚠️ **主文件与归档都要处理**。只清主文件的话，配合「归档也读回」会出现
+    /// 「清空了又自己回来」的怪象（2026-09-23 修复）。
     fn clear_host(&mut self, host: &str) {
         if !self.enabled {
             return;
@@ -605,46 +639,64 @@ impl EventWriter {
         let Some(dir) = self.dir.clone() else {
             return;
         };
-        let path = dir.join(EVENTS_FILE_NAME);
         self.file = None; // 先释放句柄，便于替换
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => {
-                self.open_file();
-                return;
-            }
-        };
         let key = normalize_host(host);
-        let mut out = String::with_capacity(content.len());
-        for line in content.lines() {
-            // 解析失败（坏行 / 残行）一律保留，避免误删
-            let keep = serde_json::from_str::<LogEvent>(line)
-                .map(|e| normalize_host(&e.target_host) != key)
-                .unwrap_or(true);
-            if keep {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-        let tmp = dir.join(EVENTS_TEMP_NAME);
-        if fs::write(&tmp, out.as_bytes()).is_ok() {
-            if fs::rename(&tmp, &path).is_err() {
-                let _ = fs::remove_file(&tmp);
-            }
+        for name in [EVENTS_FILE_NAME, EVENTS_ARCHIVE_NAME] {
+            filter_out_host(&dir, name, &key);
         }
         self.open_file();
     }
 }
 
+/// 就地剔除文件中属于 `key`（已归一化的 host）的行；文件不存在时静默跳过。
+///
+/// 解析失败的行（坏行 / 写到一半的残行）一律**保留**，避免误删。
+fn filter_out_host(dir: &Path, name: &str, key: &str) {
+    let path = dir.join(name);
+    let Ok(content) = fs::read_to_string(&path) else {
+        return;
+    };
+    let mut out = String::with_capacity(content.len());
+    for line in content.lines() {
+        let keep = serde_json::from_str::<LogEvent>(line)
+            .map(|e| normalize_host(&e.target_host) != key)
+            .unwrap_or(true);
+        if keep {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    // 过滤后为空：直接删除文件，避免在磁盘上留下 0 字节残file
+    // （下次 open_file 会按需重新创建）
+    if out.is_empty() {
+        let _ = fs::remove_file(&path);
+        return;
+    }
+    let tmp = dir.join(EVENTS_TEMP_NAME);
+    if fs::write(&tmp, out.as_bytes()).is_ok() && fs::rename(&tmp, &path).is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
 /* ----------------------------- 启动读回 ----------------------------- */
 
-/// 从文件读取历史事件（只读末尾 `EVENTS_FILE_TAIL_BYTES`）
+/// 从文件读取历史事件：**归档与主文件都读**，合并后按 `ts` 升序返回。
+///
+/// 修复（2026-09-23）：此前只读主文件，一旦发生轮转，归档里的历史就在界面上
+/// 「消失」（数据仍在磁盘上，只是读不回来）。两侧各只取末尾 `EVENTS_FILE_TAIL_BYTES`，
+/// 真正的每主机截断交给 `load_hosts` 按 `keep` 处理。
 pub fn load_history(dir: &Path) -> Vec<LogEvent> {
-    let path = dir.join(EVENTS_FILE_NAME);
-    match fs::read(&path) {
-        Ok(bytes) => parse_jsonl_tail(&bytes, EVENTS_FILE_TAIL_BYTES),
-        Err(_) => Vec::new(),
+    let mut events = Vec::new();
+    // 归档在前（更老），主文件在后（更新）。任一文件不存在都静默跳过。
+    for name in [EVENTS_ARCHIVE_NAME, EVENTS_FILE_NAME] {
+        if let Ok(bytes) = fs::read(dir.join(name)) {
+            events.extend(parse_jsonl_tail(&bytes, EVENTS_FILE_TAIL_BYTES));
+        }
     }
+    // `load_hosts` 靠「后进先出截断」保留最新，因此这里必须按时间升序。
+    // 稳定排序：同一毫秒内保持原插入顺序（归档 → 主文件）。
+    events.sort_by_key(|e| e.ts);
+    events
 }
 
 /// 解析 JSONL 字节流（只取末尾 `max_tail` 字节）；被截断时从首个换行之后开始；
@@ -680,10 +732,14 @@ pub fn parse_jsonl_tail(bytes: &[u8], max_tail: usize) -> Vec<LogEvent> {
 mod tests {
     use super::*;
 
+    /// 测试用会话标识（启动时刻）
+    const SAMPLE_SESSION: u64 = 1_700_000_000_000;
+
     fn sample_event(seq: u64, id: u64, host: &str, kind: EventKind) -> LogEvent {
         LogEvent {
             seq,
-            ts: 1_700_000_000_000 + seq,
+            session: SAMPLE_SESSION,
+            ts: SAMPLE_SESSION + seq,
             target_id: id,
             target_name: format!("主机{}", id),
             target_host: host.to_string(),
@@ -1008,5 +1064,226 @@ mod tests {
         assert_eq!(failure_text(EventKind::Fault, 3, None), "探测超时（连续 3 次）");
         assert_eq!(failure_text(EventKind::Unreachable, 1, Some("请求超时")), "无法连通：请求超时");
         assert_eq!(failure_text(EventKind::Unreachable, 1, None), "无法连通");
+    }
+
+    /* ===================== 会话标记（session） ===================== */
+
+    /// 每条事件都带上「本次运行的会话标识」，且创建后不变
+    #[test]
+    fn emit_stamps_current_session() {
+        let store = EventStore::with_session(1_756_000_000_000);
+        assert_eq!(store.session(), 1_756_000_000_000);
+        store.emit(EventKind::Start, "开始探测".into(), 1, "n", "h");
+        store.emit(EventKind::Fault, "故障".into(), 1, "n", "h");
+        let pending = store.drain_pending();
+        assert_eq!(pending.len(), 2);
+        assert!(
+            pending.iter().all(|e| e.session == 1_756_000_000_000),
+            "每条事件都应带会话标识"
+        );
+        assert!(
+            store
+                .list_host(1, 10)
+                .iter()
+                .all(|e| e.session == 1_756_000_000_000),
+            "内存环里同样带会话标识"
+        );
+    }
+
+    /// 旧行（无 `session` 字段）反序列化为 0；新行序列化必须含该字段并可往返
+    #[test]
+    fn jsonl_missing_session_defaults_to_zero() {
+        let line =
+            r#"{"seq":9,"ts":5,"target_id":1,"target_name":"a","target_host":"h","kind":"start"}"#;
+        let ev: LogEvent = serde_json::from_str(line).unwrap();
+        assert_eq!(ev.session, 0, "旧行缺 session 应默认为 0");
+
+        let ev2 = sample_event(3, 1, "h", EventKind::Start);
+        let out = serde_json::to_string(&ev2).unwrap();
+        assert!(out.contains("\"session\":"), "序列化必须含 session 字段：{}", out);
+        let back: LogEvent = serde_json::from_str(&out).unwrap();
+        assert_eq!(back, ev2);
+    }
+
+    /* ===================== 归档读回与清空（两处缺陷回归） ===================== */
+
+    /// 缺陷①回归：`load_history` 必须**同时读归档与主文件**，并按 `ts` 升序返回。
+    ///
+    /// 此前只读主文件，一旦轮转发生，归档里的历史就在界面上「消失」。
+    #[test]
+    fn load_history_merges_archive_and_main_by_ts() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_archive");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // 刻意让归档里的 seq（500/501）大于主文件的 seq（1），
+        // 以证明合并顺序依据的是 ts 而不是 seq。
+        let archived = vec![
+            LogEvent {
+                seq: 500,
+                ts: 2_000,
+                ..sample_event(1, 1, "1.1.1.1", EventKind::FirstOk)
+            },
+            LogEvent {
+                seq: 501,
+                ts: 3_000,
+                ..sample_event(2, 1, "1.1.1.1", EventKind::Fault)
+            },
+        ];
+        let main = vec![LogEvent {
+            seq: 1,
+            ts: 9_000,
+            ..sample_event(3, 1, "1.1.1.1", EventKind::Recover)
+        }];
+        let write = |name: &str, evs: &[LogEvent]| {
+            let mut s = String::new();
+            for e in evs {
+                s.push_str(&serde_json::to_string(e).unwrap());
+                s.push('\n');
+            }
+            std::fs::write(dir.join(name), s.as_bytes()).unwrap();
+        };
+        write(EVENTS_ARCHIVE_NAME, &archived);
+        write(EVENTS_FILE_NAME, &main);
+
+        let back = load_history(&dir);
+        assert_eq!(back.len(), 3, "归档 2 条 + 主文件 1 条都应读回（此前只能读到 1 条）");
+        assert_eq!(
+            back.iter().map(|e| e.ts).collect::<Vec<_>>(),
+            vec![2_000, 3_000, 9_000],
+            "必须按 ts 升序合并（load_hosts 靠后进先出截断保留最新）"
+        );
+        assert_eq!(back[2].kind, EventKind::Recover, "最新的一条来自主文件");
+    }
+
+    /// 只有归档、主文件不存在时也要能读回（刚轮转完的瞬间）
+    #[test]
+    fn load_history_works_with_archive_only() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_archive_only");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ev = sample_event(1, 1, "h", EventKind::Start);
+        std::fs::write(
+            dir.join(EVENTS_ARCHIVE_NAME),
+            format!("{}\n", serde_json::to_string(&ev).unwrap()).as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(load_history(&dir).len(), 1, "仅有归档时也应读回");
+    }
+
+    /// 缺陷②回归：清空某主机必须**同时**剔除主文件与归档里的该主机行。
+    ///
+    /// 只清主文件的话，配合缺陷① 的修复会出现「清空了又自己回来」。
+    #[test]
+    fn filter_out_host_clears_both_files() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_clear_both");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let keep_ev = sample_event(1, 2, "keep.example.com", EventKind::Start);
+        let del_ev = sample_event(2, 1, "223.5.5.5", EventKind::Fault);
+        let content = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&keep_ev).unwrap(),
+            serde_json::to_string(&del_ev).unwrap()
+        );
+        for name in [EVENTS_FILE_NAME, EVENTS_ARCHIVE_NAME] {
+            std::fs::write(dir.join(name), content.as_bytes()).unwrap();
+        }
+
+        let key = normalize_host("223.5.5.5");
+        for name in [EVENTS_FILE_NAME, EVENTS_ARCHIVE_NAME] {
+            filter_out_host(&dir, name, &key);
+        }
+
+        for name in [EVENTS_FILE_NAME, EVENTS_ARCHIVE_NAME] {
+            let text = std::fs::read_to_string(dir.join(name)).unwrap();
+            assert!(!text.contains("223.5.5.5"), "{} 仍残留被清主机：{}", name, text);
+            assert!(text.contains("keep.example.com"), "{} 误删了其他主机：{}", name, text);
+            assert_eq!(
+                text.lines().filter(|l| !l.trim().is_empty()).count(),
+                1,
+                "{} 应恰好剩 1 行",
+                name
+            );
+        }
+    }
+
+    /// 归档不存在时清空必须静默跳过（不 panic、不创建空文件）
+    #[test]
+    fn filter_out_host_tolerates_missing_file() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_clear_missing");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        filter_out_host(&dir, EVENTS_ARCHIVE_NAME, "h");
+        assert!(
+            !dir.join(EVENTS_ARCHIVE_NAME).exists(),
+            "文件不存在时不应顺手创建空文件"
+        );
+    }
+
+    /// 过滤后一条不剩时应删除文件，而不是留一个 0 字节残file
+    #[test]
+    fn filter_out_host_removes_file_when_all_cleared() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_clear_all");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ev = sample_event(1, 1, "1.1.1.1", EventKind::Fault);
+        let content = format!("{}\n", serde_json::to_string(&ev).unwrap());
+        std::fs::write(dir.join(EVENTS_FILE_NAME), content.as_bytes()).unwrap();
+
+        filter_out_host(&dir, EVENTS_FILE_NAME, &normalize_host("1.1.1.1"));
+        assert!(
+            !dir.join(EVENTS_FILE_NAME).exists(),
+            "全部清空后应删除文件，不留 0 字节残file"
+        );
+    }
+
+    /// 坏行（写到一半的残行）在清空时必须保留，避免误删用户数据
+    #[test]
+    fn filter_out_host_keeps_corrupt_lines() {
+        let dir = std::env::temp_dir().join("pingboard_qa_events_clear_corrupt");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let del_ev = sample_event(1, 1, "1.1.1.1", EventKind::Fault);
+        let content = format!("{{坏行\n{}\n", serde_json::to_string(&del_ev).unwrap());
+        std::fs::write(dir.join(EVENTS_FILE_NAME), content.as_bytes()).unwrap();
+
+        filter_out_host(&dir, EVENTS_FILE_NAME, &normalize_host("1.1.1.1"));
+        let text = std::fs::read_to_string(dir.join(EVENTS_FILE_NAME)).unwrap();
+        assert!(text.contains("{坏行"), "坏行必须保留：{}", text);
+        assert!(!text.contains("1.1.1.1"), "目标主机应被剔除：{}", text);
+    }
+
+    /* ===================== seq 口径核查 ===================== */
+
+    /// 核查「seq 每次启动从 0 开始」是否会与历史撞号。
+    ///
+    /// 结论：**不构成可达缺陷** —— `load_hosts` 会把计数器顶到**所有读回事件**（含孤儿）的
+    /// 最大 seq 之上，而读的又是文件末尾，最新的一定在读回范围内。
+    /// 本测试固化该行为，防止后续重构（例如改成「只对匹配到目标的事件计数」）把它破坏。
+    #[test]
+    fn qa_seq_resumes_above_history_max_even_with_orphans() {
+        let store = EventStore::with_session(1_756_000_000_000);
+        let mut host_to_id = HashMap::new();
+        host_to_id.insert("1.1.1.1".to_string(), 7u64);
+
+        let events = vec![
+            sample_event(10, 7, "1.1.1.1", EventKind::Start),
+            // 孤儿：当前 targets 里没有它，但 seq 更大 —— 计数器同样必须被顶起来
+            sample_event(99, 3, "orphan.example.com", EventKind::Fault),
+        ];
+        store.load_hosts(events, &host_to_id, 200);
+
+        store.emit(EventKind::Stop, "已停止".into(), 7, "n", "1.1.1.1");
+        let fresh = store.drain_pending();
+        assert_eq!(fresh.len(), 1);
+        assert!(
+            fresh[0].seq > 99,
+            "新事件 seq({}) 必须大于历史最大 seq(99)，否则前端 seq 去重会丢事件",
+            fresh[0].seq
+        );
+        assert_eq!(fresh[0].session, 1_756_000_000_000, "新事件应带当前会话标识");
     }
 }

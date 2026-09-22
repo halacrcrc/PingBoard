@@ -43,6 +43,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   loss_pct: 0,
   started_at: null,
   updated_at: 0,
+  session: 0,
   events: [],
 };
 
@@ -618,6 +619,7 @@ const App: React.FC = () => {
           <DetailPanel
             target={primaryTarget}
             logs={visiblePrimaryLogs}
+            session={snapshot.session}
             globalEventsOn={snapshot.settings.events_on}
             onToggleEnabled={handleToggleEnabled}
             onToggleEvents={handleToggleEvents}

@@ -117,13 +117,17 @@ fn to_csv(targets: &[TargetState]) -> String {
 }
 
 /// 生成事件 CSV（带 UTF-8 BOM；时间列为**本地时间**）
+///
+/// 「会话」列 = 该条事件所属那次运行的启动时刻（本地时间），用于在 Excel 里
+/// 按批次筛选；本字段引入之前的旧行输出空串。
 fn to_events_csv(events: &[LogEvent], tz_offset_minutes: i64) -> String {
     let mut out = String::from("\u{feff}");
-    out.push_str("序号,时间(本地),主机,备注,事件类型,等级,说明\n");
+    out.push_str("序号,会话（启动于）,时间(本地),主机,备注,事件类型,等级,说明\n");
     for (i, e) in events.iter().enumerate() {
         out.push_str(&format!(
-            "{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{}\n",
             i + 1,
+            esc_csv(&fmt_session(e.session, tz_offset_minutes)),
             esc_csv(&fmt_time_local(e.ts, tz_offset_minutes)),
             esc_csv(&e.target_host),
             esc_csv(&e.target_name),
@@ -133,6 +137,14 @@ fn to_events_csv(events: &[LogEvent], tz_offset_minutes: i64) -> String {
         ));
     }
     out
+}
+
+/// 会话标识（启动时刻，纪元毫秒）→ 本地时间字符串；`0`（旧行）输出空串
+fn fmt_session(session: u64, tz_offset_minutes: i64) -> String {
+    if session == 0 {
+        return String::new();
+    }
+    fmt_time_local(session, tz_offset_minutes)
 }
 
 /// 纪元毫秒 → 本地时间字符串：在既有 UTC 民用历算法上叠加时区偏移（东 8 区取 +480 分钟）
@@ -421,9 +433,13 @@ mod tests {
 
     /* ===================== 事件 CSV ===================== */
 
+    /// 会话标识固定值：**刻意与 `ts` 不同**，便于分别断言「会话」与「时间」两列
+    const SAMPLE_SESSION: u64 = 1_699_000_000_000;
+
     fn sample_event(seq: u64, host: &str, name: &str, kind: crate::events::EventKind) -> LogEvent {
         LogEvent {
             seq,
+            session: SAMPLE_SESSION,
             ts: 1_700_000_000_000,
             target_id: 1,
             target_name: name.to_string(),
@@ -434,7 +450,7 @@ mod tests {
         }
     }
 
-    /// 事件 CSV：BOM + 7 列表头 + 本地时间列 + 转义
+    /// 事件 CSV：BOM + 8 列表头 + 会话列 + 本地时间列 + 转义
     #[test]
     fn qa_events_csv_real_file() {
         use crate::events::EventKind;
@@ -456,9 +472,10 @@ mod tests {
         let lines: Vec<&str> = body.trim_end().split('\n').collect();
         assert_eq!(lines.len(), 3, "表头 + 2 行数据");
         assert!(lines[0].contains("时间(本地)"), "表头必须标注「时间(本地)」");
-        assert_eq!(count_csv_fields(lines[0]), 7, "事件 CSV 应为 7 列");
+        assert!(lines[0].contains("会话"), "表头必须含「会话」列");
+        assert_eq!(count_csv_fields(lines[0]), 8, "事件 CSV 应为 8 列");
         for (i, l) in lines[1..].iter().enumerate() {
-            assert_eq!(count_csv_fields(l), 7, "第 {} 行列数不一致", i + 1);
+            assert_eq!(count_csv_fields(l), 8, "第 {} 行列数不一致", i + 1);
         }
         assert!(body.contains("\"阿里, DNS\""), "含逗号字段应被引号包裹");
         assert!(body.contains("\"测试,带逗号\""), "说明字段含逗号应被转义");
@@ -466,6 +483,38 @@ mod tests {
         assert!(body.contains("已恢复"));
         // 本地时间：东 8 区应为 2023-11-15 06:13:20
         assert!(body.contains("2023-11-15 06:13:20"), "应为本地时间：{}", body);
+        // 会话列：SAMPLE_SESSION 按东 8 区渲染
+        let session_cell = fmt_time_local(SAMPLE_SESSION, 480);
+        assert!(
+            body.contains(&session_cell),
+            "会话列应为本次运行启动时刻（本地时间 {}）：{}",
+            session_cell,
+            body
+        );
+        assert_ne!(
+            session_cell, "2023-11-15 06:13:20",
+            "会话与事件时间的测试值应不同，否则断言无法区分两列"
+        );
+    }
+
+    /// 旧行（`session == 0`，即本字段引入之前写入的）会话列输出空串，不得渲染成 1970 年
+    #[test]
+    fn qa_events_csv_legacy_session_renders_empty() {
+        use crate::events::EventKind;
+
+        let dir = qa_dir();
+        let path = dir.join("events_legacy.csv");
+        let p = path.to_string_lossy().to_string();
+        let mut ev = sample_event(1, "1.1.1.1", "旧记录", EventKind::Start);
+        ev.session = 0;
+        write_events_csv(&p, &[ev], 480).expect("写事件 CSV 失败");
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        let body = body.trim_start_matches('\u{feff}');
+        let row = body.trim_end().split('\n').nth(1).unwrap();
+        // 第二列（会话）必须为空
+        assert_eq!(row.split(',').nth(1), Some(""), "session=0 应输出空列：{}", row);
+        assert!(!body.contains("1970-01-01"), "不得把 0 渲染成 1970 年：{}", body);
     }
 
     /// 时区偏移换算：0 → UTC；+480 → +8h；-480 → -8h

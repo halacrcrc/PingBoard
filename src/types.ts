@@ -66,6 +66,8 @@ export interface Snapshot {
   loss_pct: number;
   started_at: number | null;
   updated_at: number;
+  /** 本次运行的会话标识（= 进程启动时刻，纪元毫秒）；用于区分日志行的批次归属 */
+  session: number;
   /** 自上次快照以来新增的事件（增量，空闲为 []） */
   events: LogEvent[];
 }
@@ -97,7 +99,10 @@ export type EventLevel = "fault" | "standard" | "detail";
 
 /** 事件日志条目（对应 Rust 的 LogEvent） */
 export interface LogEvent {
+  /** 会话内单调递增序号（跨会话比较无意义，切批次请用 session） */
   seq: number;
+  /** 本事件所属运行批次的标识 = 该次进程启动时刻（纪元毫秒）；旧记录为 0 */
+  session: number;
   ts: number;
   target_id: number;
   target_name: string;
