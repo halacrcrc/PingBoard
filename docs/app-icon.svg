@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#12203A"/><stop offset="1" stop-color="#22344F"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#047857"/><stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+  </defs>
+  <rect x="40" y="40" width="944" height="944" rx="200" fill="url(#bg)"/>
+  <rect x="40" y="40" width="944" height="944" rx="200" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="8"/>
+  <path fill-rule="evenodd" fill="url(#ring)" opacity="0.95"
+        d="M 512,40 A 472,472 0 1 1 512,984 A 472,472 0 1 1 512,40 Z
+           M 512,202 A 310,310 0 1 0 512,822 A 310,310 0 1 0 512,202 Z"/>
+  <path d="M 512,512 L 495.5,40.3 A 472,472 0 0 1 928.7,290.4 Z" fill="#A7F3D0" opacity="0.20"/>
+  <path fill-rule="evenodd" fill="#10B981" opacity="0.62"
+        d="M 512,261 A 251,251 0 1 1 512,763 A 251,251 0 1 1 512,261 Z
+           M 512,364 A 148,148 0 1 0 512,660 A 148,148 0 1 0 512,364 Z"/>
+  <circle cx="512" cy="512" r="113" fill="#34D399"/>
+  <circle cx="791.3" cy="232.7" r="60" fill="#A7F3D0"/>
+  <circle cx="512" cy="512" r="59" fill="#ECFDF5"/>
+</svg>
