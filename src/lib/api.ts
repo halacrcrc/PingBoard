@@ -1,6 +1,6 @@
 // Tauri invoke 命令封装：与 Rust 侧 #[tauri::command] 一一对应
 import { invoke } from "@tauri-apps/api/core";
-import type { ImportPayload, PingSettings, Snapshot, TargetEntry } from "../types";
+import type { ImportPayload, LogEvent, PingSettings, Snapshot, TargetEntry } from "../types";
 
 /** 获取当前完整快照（目标列表 + 设置 + 汇总统计） */
 export const getState = (): Promise<Snapshot> => invoke<Snapshot>("get_state");
@@ -58,3 +58,22 @@ export const getConfigPath = (): Promise<string> => invoke<string>("get_config_p
 /** 读取导入文件（txt/csv → 文本；xlsx/xls/ods → 表格）；解析动作仍在前端完成 */
 export const readImportFile = (path: string): Promise<ImportPayload> =>
   invoke<ImportPayload>("read_import_file", { path });
+
+/** 读取某主机的最近事件（选中主机回填），按新→旧返回 */
+export const listEvents = (targetId: number, limit: number): Promise<LogEvent[]> =>
+  invoke<LogEvent[]>("list_events", { targetId, limit });
+
+/** 清空某主机的事件（内存 + 文件重写） */
+export const clearEvents = (targetId: number): Promise<void> =>
+  invoke<void>("clear_events", { targetId });
+
+/** 导出事件为 CSV；targetId 为 null 表示导出全部主机 */
+export const exportEvents = (
+  path: string,
+  targetId: number | null,
+  tzOffsetMinutes: number
+): Promise<void> => invoke<void>("export_events", { path, targetId, tzOffsetMinutes });
+
+/** 设置单主机「记录事件」开关并持久化 */
+export const setTargetEvents = (id: number, eventsOn: boolean): Promise<void> =>
+  invoke<void>("set_target_events", { id, eventsOn });

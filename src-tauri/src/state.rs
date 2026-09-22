@@ -7,6 +7,7 @@
 //   * 由独立任务每 500ms 主动 emit 一次聚合快照，前端只做整体替换
 use std::collections::HashMap;
 use std::net::{IpAddr, ToSocketAddrs};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
@@ -14,9 +15,24 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::events::{self, EventKind, FailSource, LogEvent};
 use crate::model::{AppConfig, PingSettings, Snapshot, Status, TargetConfig, TargetEntry, TargetState};
 use crate::pinger::{fallback, Engine};
 use crate::{config, stats};
+
+/// 停止原因：只有「用户主动停止」才产生 `stop` 事件。
+///
+/// * `User` —— 用户点「停止全部 / 停止选中」；**打点**
+/// * `Internal` —— 删除目标 / 关闭监控 / `set_enabled(false)`；**不打点**（改由 `config_change` 表达）
+///
+/// 程序退出（`WindowEvent::CloseRequested`）不会调用 `stop`，线程随进程结束，故也不产生 `stop`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// 用户主动停止
+    User,
+    /// 内部原因（删除 / 关闭监控 / 禁用）
+    Internal,
+}
 
 /// 共享的目标句柄
 pub type SharedTarget = Arc<Mutex<TargetState>>;
@@ -47,6 +63,10 @@ pub struct Inner {
     started_at: Mutex<Option<u64>>,
     /// 一旦 ICMP 不可用即置位，之后所有线程直接走 ping.exe
     icmp_failed: AtomicBool,
+    /// 事件存储（增量缓冲 + 每主机环 + JSONL 持久化）
+    events: events::EventStore,
+    /// 事件默认目录（app_config_dir；由 setup 注入）
+    events_base_dir: Mutex<Option<PathBuf>>,
 }
 
 /// 应用状态（由 Tauri manage）
@@ -65,6 +85,8 @@ impl AppState {
                 workers: Mutex::new(HashMap::new()),
                 started_at: Mutex::new(None),
                 icmp_failed: AtomicBool::new(false),
+                events: events::EventStore::new(),
+                events_base_dir: Mutex::new(None),
             }),
         }
     }
@@ -96,6 +118,8 @@ impl AppState {
             loss_pct: stats::loss_pct(total_sent, total_failed),
             started_at,
             updated_at: now_ms(),
+            // 增量事件：取走并清空 pending，空闲时为 []
+            events: self.inner.events.drain_pending(),
         }
     }
 
@@ -110,6 +134,7 @@ impl AppState {
                         name: g.name.clone(),
                         host: g.host.clone(),
                         enabled: g.enabled,
+                        events_on: g.events_on,
                     }
                 })
                 .collect()
@@ -144,8 +169,101 @@ impl AppState {
             let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
             let mut state = TargetState::new(id, tc.name.clone(), tc.host.clone());
             state.enabled = tc.enabled;
+            state.events_on = tc.events_on;
             list.push(Arc::new(Mutex::new(state)));
         }
+    }
+
+    /* ----------------------------- 事件日志 ----------------------------- */
+
+    /// 注入事件默认目录（`app_config_dir`）并应用一次持久化配置
+    pub fn configure_events(&self, base_dir: PathBuf) {
+        *self.inner.events_base_dir.lock().unwrap() = Some(base_dir);
+        self.refresh_events_persist();
+    }
+
+    /// 依据当前设置刷新事件存储（keep + 持久化开关 + 目录）
+    fn refresh_events_persist(&self) {
+        let (keep, persist, dir_opt) = {
+            let s = self.inner.settings.read().unwrap();
+            (s.events_keep, s.events_persist, s.events_dir.clone())
+        };
+        let base = self.inner.events_base_dir.lock().unwrap().clone();
+        let dir = match dir_opt {
+            Some(d) => Some(PathBuf::from(d)),
+            None => base,
+        };
+        self.inner.events.set_keep(keep);
+        self.inner.events.apply_persist(persist, dir);
+    }
+
+    /// 启动读回：从事件文件加载历史，按 host 归属到当前目标（历史标记为已读）
+    pub fn load_events_from_file(&self) {
+        let (persist, keep, dir_opt) = {
+            let s = self.inner.settings.read().unwrap();
+            (s.events_persist, s.events_keep, s.events_dir.clone())
+        };
+        if !persist {
+            return;
+        }
+        let dir = match dir_opt {
+            Some(d) => PathBuf::from(d),
+            None => match self.inner.events_base_dir.lock().unwrap().clone() {
+                Some(b) => b,
+                None => return,
+            },
+        };
+        let history = events::load_history(&dir);
+        if history.is_empty() {
+            return;
+        }
+        // host（trim + 小写）-> 当前 id
+        let mut host_to_id: HashMap<String, u64> = HashMap::new();
+        {
+            let list = self.inner.targets.lock().unwrap();
+            for t in list.iter() {
+                let g = t.lock().unwrap();
+                host_to_id.insert(events::normalize_host(&g.host), g.id);
+            }
+        }
+        self.inner.events.load_hosts(history, &host_to_id, keep);
+    }
+
+    /// 读取某主机的最近 `limit` 条事件（新→旧）
+    pub fn list_events(&self, target_id: u64, limit: usize) -> Vec<LogEvent> {
+        self.inner.events.list_host(target_id, limit)
+    }
+
+    /// 清空某主机的事件（内存 + 文件重写）
+    pub fn clear_events(&self, target_id: u64) {
+        let host = self
+            .find(target_id)
+            .map(|t| t.lock().unwrap().host.clone());
+        match host {
+            Some(h) => self.inner.events.clear_host(target_id, &h),
+            None => self.inner.events.clear_host(target_id, ""),
+        }
+    }
+
+    /// 收集事件用于导出：`Some(id)` 只取该主机，`None` 取全部（按 seq 升序）
+    pub fn collect_events(&self, target_id: Option<u64>) -> Vec<LogEvent> {
+        match target_id {
+            Some(id) => {
+                let mut v = self.inner.events.list_host(id, usize::MAX);
+                v.reverse(); // 转回升序，便于导出呈时间正序
+                v
+            }
+            None => self.inner.events.all_events(),
+        }
+    }
+
+    /// 设置单主机「记录事件」开关（仅改该字段，避免全量更新副作用）
+    pub fn set_target_events(&self, id: u64, events_on: bool) -> Result<(), String> {
+        let target = self
+            .find(id)
+            .ok_or_else(|| format!("目标 {} 不存在", id))?;
+        target.lock().unwrap().events_on = events_on;
+        Ok(())
     }
 
     /* ----------------------------- 目标管理 ----------------------------- */
@@ -190,7 +308,7 @@ impl AppState {
 
     /// 删除目标（会先停止其工作线程）
     pub fn remove_targets(&self, ids: &[u64]) {
-        self.stop(Some(ids.to_vec()));
+        self.stop(Some(ids.to_vec()), StopReason::Internal);
         let mut list = self.inner.targets.lock().unwrap();
         list.retain(|t| !ids.contains(&t.lock().unwrap().id));
     }
@@ -209,14 +327,20 @@ impl AppState {
             return Err("主机名不能为空".to_string());
         }
         let name_trim = name.trim().to_string();
+        let global_on = self.inner.settings.read().unwrap().events_on;
         {
             let mut g = target.lock().unwrap();
-            let host_changed = g.host != new_host;
-            g.name = if name_trim.is_empty() {
+            let old_name = g.name.clone();
+            let old_host = g.host.clone();
+            let old_enabled = g.enabled;
+
+            let new_name = if name_trim.is_empty() {
                 new_host.clone()
             } else {
                 name_trim
             };
+            let host_changed = g.host != new_host;
+            g.name = new_name;
             if host_changed {
                 g.host = new_host;
                 g.resolved_ip = None; // 主机名变更后需重新解析
@@ -224,9 +348,34 @@ impl AppState {
                 g.last_error = None;
             }
             g.enabled = enabled;
+
+            // 配置变更事件（详细级）：仅记录真正发生变化的字段
+            if global_on && g.events_on {
+                if old_name != g.name {
+                    let text = format!("配置变更：备注名 -> {}", g.name);
+                    self.inner
+                        .events
+                        .emit(EventKind::ConfigChange, text, id, &g.name, &g.host);
+                }
+                if old_host != g.host {
+                    let text = format!("配置变更：主机名 -> {}", g.host);
+                    self.inner
+                        .events
+                        .emit(EventKind::ConfigChange, text, id, &g.name, &g.host);
+                }
+                if old_enabled != g.enabled {
+                    let text = format!(
+                        "配置变更：启用状态 -> {}",
+                        if g.enabled { "开启" } else { "关闭" }
+                    );
+                    self.inner
+                        .events
+                        .emit(EventKind::ConfigChange, text, id, &g.name, &g.host);
+                }
+            }
         }
         if !enabled {
-            self.stop(Some(vec![id]));
+            self.stop(Some(vec![id]), StopReason::Internal);
         } else if self.inner.running.load(Ordering::SeqCst) {
             let _ = self.start(Some(vec![id]));
         }
@@ -245,7 +394,7 @@ impl AppState {
                 let _ = self.start(Some(ids.to_vec()));
             }
         } else {
-            self.stop(Some(ids.to_vec()));
+            self.stop(Some(ids.to_vec()), StopReason::Internal);
         }
     }
 
@@ -324,7 +473,9 @@ impl AppState {
     /// 三阶段实现：先置位、立即更新可见状态、后台回收线程。
     /// 命令本身**不 join 工作线程**——否则耗时 ≈ Σ(各线程退出时间)，N 台会累加到十几秒；
     /// 现在无论目标多少都在毫秒级返回，不再随目标数增长。
-    pub fn stop(&self, ids: Option<Vec<u64>>) {
+    pub fn stop(&self, ids: Option<Vec<u64>>, reason: StopReason) {
+        let global_on = self.inner.settings.read().unwrap().events_on;
+
         // 1. 先把句柄从表中摘出（持锁时间极短，不在锁内 join）
         let handles: Vec<(u64, WorkerHandle)> = {
             let mut map = self.inner.workers.lock().unwrap();
@@ -342,10 +493,21 @@ impl AppState {
         };
 
         // 2. 置位停止标志，并**立即**把可见状态改为已停止（不等线程真正退出）
+        //    仅「用户主动停止」才产生 stop 事件（标准级）。
         for (id, h) in &handles {
             h.stop.store(true, Ordering::SeqCst);
             if let Some(t) = self.find(*id) {
-                t.lock().unwrap().running = false;
+                let mut g = t.lock().unwrap();
+                g.running = false;
+                if reason == StopReason::User && global_on && g.events_on {
+                    self.inner.events.emit(
+                        EventKind::Stop,
+                        "已停止".to_string(),
+                        *id,
+                        &g.name,
+                        &g.host,
+                    );
+                }
             }
         }
 
@@ -417,6 +579,8 @@ impl AppState {
             );
         }
         *self.inner.settings.write().unwrap() = settings;
+        // 事件目录 / 开关 / keep 可能变化：刷新持久化配置
+        self.refresh_events_persist();
         Ok(())
     }
 }
@@ -432,6 +596,7 @@ impl Default for AppState {
 /// 启动一个目标的工作线程
 fn spawn_worker(inner: Arc<Inner>, target: SharedTarget) {
     let id = { target.lock().unwrap().id };
+    let global_on = inner.settings.read().unwrap().events_on;
     let stop = Arc::new(AtomicBool::new(false));
     let stop_clone = stop.clone();
     let inner_clone = inner.clone();
@@ -443,7 +608,16 @@ fn spawn_worker(inner: Arc<Inner>, target: SharedTarget) {
         .ok();
 
     inner.workers.lock().unwrap().insert(id, WorkerHandle { stop, join });
-    target.lock().unwrap().running = true;
+    {
+        let mut g = target.lock().unwrap();
+        g.running = true;
+        // 每个 worker 启动记 1 条 start（标准级）
+        if global_on && g.events_on {
+            inner
+                .events
+                .emit(EventKind::Start, "开始探测".to_string(), id, &g.name, &g.host);
+        }
+    }
 }
 
 /// 判断给定 stop 标志是否仍是该目标「当前注册」的 worker。
@@ -468,7 +642,7 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
 
     while !stop.load(Ordering::SeqCst) {
         // 每轮读取最新设置（运行中修改立即生效）
-        let (interval_ms, timeout_ms, payload_size, ttl, history_len) = {
+        let (interval_ms, timeout_ms, payload_size, ttl, history_len, events_on) = {
             let s = inner.settings.read().unwrap();
             (
                 s.interval_ms,
@@ -476,6 +650,7 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
                 s.payload_size,
                 s.ttl,
                 s.history_len,
+                s.events_on,
             )
         };
 
@@ -483,6 +658,12 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
         if host.is_empty() {
             break;
         }
+
+        // 本轮写入前的状态（上一次已完成结果），用于状态迁移打点。
+        // 刻意在「置 Resolving 之前」读取：解析每轮都会把状态临时置为 Resolving，
+        // 若以解析后的状态为 prev，持久性 DNS 失败会每轮重复产出 dns_fail，
+        // 违反「连续失败不重复记」（设计稿 1.4 / 8-T02 验收）。
+        let prev_status = { target.lock().unwrap().status };
 
         // ---------- 解析（带缓存） ----------
         let cached = { target.lock().unwrap().resolved_ip.clone() };
@@ -511,6 +692,19 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
                         let mut g = target.lock().unwrap();
                         g.last_error = Some(e);
                         stats::apply_failure(&mut g, history_len, Status::Failed);
+                        // 解析失败：resolving -> failed（来源 Resolve）
+                        if events_on && g.events_on {
+                            if let Some(kind) =
+                                events::classify_transition(prev_status, Status::Failed, FailSource::Resolve)
+                            {
+                                let text = events::failure_text(
+                                    kind,
+                                    g.consecutive_fail,
+                                    g.last_error.as_deref(),
+                                );
+                                inner.events.emit(kind, text, id, &g.name, &g.host);
+                            }
+                        }
                     }
                     sleep_interruptible(&stop, interval_ms);
                     continue;
@@ -559,21 +753,51 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
         {
             let mut g = target.lock().unwrap();
             match outcome.status {
-                Status::Ok => stats::apply_success(
-                    &mut g,
-                    outcome.rtt_ms.unwrap_or(0.0),
-                    outcome.ttl,
-                    now,
-                    history_len,
-                ),
+                Status::Ok => {
+                    let rtt = outcome.rtt_ms.unwrap_or(0.0);
+                    stats::apply_success(&mut g, rtt, outcome.ttl, now, history_len);
+                    // 成功：recover / first_ok（来源 Probe）
+                    if events_on && g.events_on {
+                        if let Some(kind) =
+                            events::classify_transition(prev_status, Status::Ok, FailSource::Probe)
+                        {
+                            let text = events::success_text(kind, rtt);
+                            inner.events.emit(kind, text, id, &g.name, &g.host);
+                        }
+                    }
+                }
                 Status::Timeout => {
                     stats::apply_failure(&mut g, history_len, Status::Timeout);
+                    // 超时：fault / unreachable（来源 Probe）
+                    if events_on && g.events_on {
+                        if let Some(kind) = events::classify_transition(
+                            prev_status,
+                            Status::Timeout,
+                            FailSource::Probe,
+                        ) {
+                            let text = events::failure_text(kind, g.consecutive_fail, None);
+                            inner.events.emit(kind, text, id, &g.name, &g.host);
+                        }
+                    }
                 }
                 _ => {
                     if outcome.error.is_some() {
                         g.last_error = outcome.error.clone();
                     }
                     stats::apply_failure(&mut g, history_len, Status::Failed);
+                    // 系统错误：fault / unreachable（来源 Probe）
+                    if events_on && g.events_on {
+                        if let Some(kind) =
+                            events::classify_transition(prev_status, Status::Failed, FailSource::Probe)
+                        {
+                            let text = events::failure_text(
+                                kind,
+                                g.consecutive_fail,
+                                g.last_error.as_deref(),
+                            );
+                            inner.events.emit(kind, text, id, &g.name, &g.host);
+                        }
+                    }
                 }
             }
             if still_current {
@@ -677,6 +901,11 @@ mod tests {
                 beep_on_fail: false,
                 auto_start,
                 history_len: 60,
+                events_on: true,
+                events_level: events::EventLevel::Standard,
+                events_persist: false,
+                events_dir: None,
+                events_keep: 200,
             },
             targets: targets
                 .into_iter()
@@ -684,6 +913,7 @@ mod tests {
                     name: n.into(),
                     host: h.into(),
                     enabled: true,
+                    events_on: true,
                 })
                 .collect(),
         }
@@ -707,6 +937,11 @@ mod tests {
                 beep_on_fail: false,
                 auto_start: false,
                 history_len: 60,
+                events_on: true,
+                events_level: events::EventLevel::Standard,
+                events_persist: false,
+                events_dir: None,
+                events_keep: 200,
             },
             targets: Vec::new(),
         };
@@ -716,6 +951,7 @@ mod tests {
                 name: format!("loop-{}", i),
                 host: "127.0.0.1".to_string(),
                 enabled: true,
+                events_on: true,
             });
         }
         cfg
@@ -797,7 +1033,7 @@ mod tests {
             assert!(t.running, "目标 {} 应处于运行态", t.host);
         }
 
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         let after = st.snapshot();
         assert_eq!(after.active_threads, 0, "stop 后线程应全部退出（无泄漏）");
         assert!(!after.running);
@@ -837,7 +1073,7 @@ mod tests {
             2,
             "运行中新增目标应自动启动新线程"
         );
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         assert_eq!(st.snapshot().active_threads, 0);
     }
 
@@ -855,7 +1091,7 @@ mod tests {
         eprintln!("[qa] 关闭上限后活跃线程数：{}", n);
         assert_eq!(n, 3, "关闭上限后应启动全部 3 个线程");
 
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         assert_eq!(st.snapshot().active_threads, 0, "stop 后应清理干净");
     }
 
@@ -906,7 +1142,7 @@ mod tests {
         assert!(!running.contains(&ids[2]), "未选中的目标不应运行");
 
         // 只停第 1 个，未选中的第 2 个应继续运行
-        st.stop(Some(vec![ids[0]]));
+        st.stop(Some(vec![ids[0]]), StopReason::Internal);
         std::thread::sleep(Duration::from_millis(200));
         let snap2 = st.snapshot();
         assert_eq!(snap2.active_threads, 1, "只停 1 个后应剩 1 个线程");
@@ -915,7 +1151,7 @@ mod tests {
         assert!(!t1.running, "被选停的目标应停止");
         assert!(t2.running, "未被选停的目标必须继续运行");
 
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         assert_eq!(st.snapshot().active_threads, 0);
     }
 
@@ -939,7 +1175,7 @@ mod tests {
             assert!(t.sent >= 1, "目标 {} 应已发包（sent={}）", t.host, t.sent);
             assert!(t.running, "目标 {} 应处于运行态", t.host);
         }
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         assert_eq!(st.snapshot().active_threads, 0, "停止后无残留线程");
     }
 
@@ -987,7 +1223,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2200));
         assert_eq!(st.snapshot().active_threads, 4, "4 个目标应全部运行");
 
-        st.stop(Some(vec![ids[0]]));
+        st.stop(Some(vec![ids[0]]), StopReason::Internal);
         // stop 现在「先置位、立即返回、后台回收」；(b) 的停止检查保证旧线程不再写回统计，
         // 故此处取到的 sent 已稳定
         let after_stop = st.snapshot();
@@ -1015,7 +1251,7 @@ mod tests {
             );
         }
         eprintln!("[qa] stop-one: active={} total_sent={}", after.active_threads, after.total_sent);
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         assert_eq!(st.snapshot().active_threads, 0);
     }
 
@@ -1034,7 +1270,7 @@ mod tests {
         eprintln!("[qa-v112] stop 前：threads={} sent={}", before.active_threads, before.total_sent);
 
         let t0 = std::time::Instant::now();
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
         let elapsed = t0.elapsed();
         eprintln!("[qa-v112] stop(None) 100 目标耗时：{} ms", elapsed.as_millis());
         assert!(
@@ -1079,7 +1315,7 @@ mod tests {
             st.start(None).unwrap();
             std::thread::sleep(Duration::from_millis(50)); // 让 worker 进入 probe/休眠
             // 停全部后立即重新启动全部：旧 worker 与新 worker 会短暂重叠
-            st.stop(None);
+            st.stop(None, StopReason::Internal);
             st.start(None).unwrap();
 
             // 以 60ms 粒度采样，任一时刻都不应出现「enabled 且 running=false」
@@ -1104,6 +1340,126 @@ mod tests {
             );
         }
 
-        st.stop(None);
+        st.stop(None, StopReason::Internal);
+    }
+
+    /* ===================== v1.2.0 新增：事件日志端到端 ===================== */
+
+    /// 配置变更：改备注名应产生 config_change（详细级），且文本带新值
+    #[test]
+    fn qa_events_config_change_recorded() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg(vec![("orig", "127.0.0.1")], false, 256, 200));
+        let id = st.snapshot().targets[0].id;
+
+        st.update_target(id, "新备注".to_string(), "127.0.0.1".to_string(), true)
+            .unwrap();
+        let snap = st.snapshot();
+        assert!(
+            snap.events
+                .iter()
+                .any(|e| e.kind == EventKind::ConfigChange && e.text.contains("新备注")),
+            "改备注名应产生含新值的 config_change：{:?}",
+            snap.events
+        );
+        // 无变化时不应产生事件
+        st.update_target(id, "新备注".to_string(), "127.0.0.1".to_string(), true)
+            .unwrap();
+        let snap2 = st.snapshot();
+        assert!(
+            !snap2.events.iter().any(|e| e.kind == EventKind::ConfigChange),
+            "无变化不应产生 config_change"
+        );
+    }
+
+    /// 启动即失败：真实探测保留网段 192.0.2.1 → 记 unreachable
+    #[test]
+    fn qa_events_unreachable_on_startup_failure() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg(vec![("dead", "192.0.2.1")], false, 256, 200));
+        st.start(None).unwrap();
+        std::thread::sleep(Duration::from_millis(2600));
+        let snap = st.snapshot();
+        eprintln!(
+            "[qa-events] 启动即失败事件：{:?}",
+            snap.events.iter().map(|e| (e.kind, e.text.clone())).collect::<Vec<_>>()
+        );
+        assert!(
+            snap.events.iter().any(|e| e.kind == EventKind::Unreachable),
+            "启动即失败应记录 unreachable：{:?}",
+            snap.events
+        );
+        st.stop(None, StopReason::Internal);
+    }
+
+    /// DNS 失败：不存在的域名 → dns_fail；且连续失败不重复记；用户停止 → stop
+    #[test]
+    fn qa_events_dns_fail_dedup_and_user_stop() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg(
+            vec![("bad", "no-such-host-xyz.invalid")],
+            false,
+            256,
+            200,
+        ));
+        st.start(None).unwrap();
+
+        // 第 1 段：应至少记录 1 条 dns_fail（同时含 1 条 start）
+        std::thread::sleep(Duration::from_millis(1500));
+        let snap1 = st.snapshot();
+        let dns1 = snap1
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::DnsFail)
+            .count();
+        eprintln!("[qa-events] DNS 第 1 段事件：{:?}", snap1.events);
+        assert!(dns1 >= 1, "DNS 失败应记录 dns_fail");
+        assert!(
+            snap1.events.iter().any(|e| e.kind == EventKind::Start),
+            "worker 启动应记录 start"
+        );
+
+        // 第 2 段：持续 DNS 失败不应重复记录（去重）
+        std::thread::sleep(Duration::from_millis(1200));
+        let snap2 = st.snapshot();
+        let dns2 = snap2
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::DnsFail)
+            .count();
+        assert_eq!(dns2, 0, "连续 DNS 失败不应重复记录：{:?}", snap2.events);
+
+        // 用户停止 → 1 条 stop
+        st.stop(None, StopReason::User);
+        let snap3 = st.snapshot();
+        let stops = snap3
+            .events
+            .iter()
+            .filter(|e| e.kind == EventKind::Stop)
+            .count();
+        assert_eq!(stops, 1, "用户停止应记录恰好 1 条 stop：{:?}", snap3.events);
+    }
+
+    /// 单主机开关关闭时不产生事件；set_target_events 状态可读回
+    #[test]
+    fn qa_events_per_target_switch_and_persist_flag() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg(vec![("bad", "no-such-host-xyz.invalid")], false, 256, 200));
+        let id = st.snapshot().targets[0].id;
+
+        st.set_target_events(id, false).unwrap();
+        assert!(!st.snapshot().targets[0].events_on, "单主机开关应被写入");
+        assert!(st.set_target_events(9999, true).is_err(), "不存在的主机应报错");
+
+        // 关闭后启动探测：不应产生任何事件
+        st.start(None).unwrap();
+        std::thread::sleep(Duration::from_millis(1200));
+        let snap = st.snapshot();
+        assert!(
+            snap.events.is_empty(),
+            "单主机开关关闭时不应产生事件：{:?}",
+            snap.events
+        );
+        st.stop(None, StopReason::Internal);
     }
 }

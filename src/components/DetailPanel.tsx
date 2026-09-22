@@ -1,14 +1,25 @@
 // 详情面板：选中主机的延迟折线图、完整统计与最近日志
 import React from "react";
-import type { LogEntry, TargetState } from "../types";
-import { fmtMs, fmtPct, fmtTime, statusLabel } from "../lib/format";
+import type { LogEvent, TargetState } from "../types";
+import { eventColorClass, fmtMs, fmtPct, fmtTime, statusLabel } from "../lib/format";
 import LatencyChart from "./LatencyChart";
 
 export interface DetailPanelProps {
   target: TargetState | null;
-  logs: LogEntry[];
+  /** 已按当前事件等级过滤后的日志（新→旧） */
+  logs: LogEvent[];
+  /** 全局事件总开关（关闭时单主机开关不产生事件） */
+  globalEventsOn: boolean;
   /** 切换目标的监控（启用）状态：参与「开始全部」与开机自动启动 */
   onToggleEnabled: (id: number, enabled: boolean) => void;
+  /** 切换单主机「记录事件」开关 */
+  onToggleEvents: (id: number, eventsOn: boolean) => void;
+  /** 复制当前可见日志到剪贴板 */
+  onCopy: () => void;
+  /** 导出当前主机的日志为 CSV */
+  onExportCsv: () => void;
+  /** 清空当前主机的日志（走 ConfirmDialog） */
+  onClear: () => void;
 }
 
 const Stat: React.FC<{ label: string; value: React.ReactNode; accent?: string }> = ({
@@ -22,7 +33,32 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; accent?: string }>
   </div>
 );
 
-const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled }) => {
+/** 自绘 switch 基础样式（与「监控」开关一致） */
+const switchClass = (on: boolean) =>
+  `relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
+    on ? "bg-emerald-500 dark:bg-emerald-600" : "bg-slate-300 dark:bg-slate-600"
+  }`;
+const switchKnobClass = (on: boolean) =>
+  `inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+    on ? "translate-x-4" : "translate-x-0.5"
+  }`;
+
+/** 日志区操作小按钮（沿用工具栏 chip 风格：禁止折行与压缩） */
+const chip =
+  "h-6 px-2 max-[1199px]:px-1 text-[11px] rounded border leading-none whitespace-nowrap shrink-0 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed";
+const chipDanger =
+  "h-6 px-2 max-[1199px]:px-1 text-[11px] rounded border leading-none whitespace-nowrap shrink-0 border-transparent bg-red-600 hover:bg-red-700 text-white disabled:opacity-40 disabled:cursor-not-allowed";
+
+const DetailPanel: React.FC<DetailPanelProps> = ({
+  target,
+  logs,
+  globalEventsOn,
+  onToggleEnabled,
+  onToggleEvents,
+  onCopy,
+  onExportCsv,
+  onClear,
+}) => {
   if (!target) {
     return (
       <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm">
@@ -30,6 +66,8 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
       </div>
     );
   }
+
+  const recording = globalEventsOn && target.events_on;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -46,7 +84,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
         </div>
         {/* 自绘 switch：绿色=已纳入监控，灰色=未监控 */}
         <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
             {target.enabled ? "已监控" : "监控"}
           </span>
           <button
@@ -55,15 +93,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
             aria-checked={target.enabled}
             title="纳入监控：参与「开始全部」与开机自动启动"
             onClick={() => onToggleEnabled(target.id, !target.enabled)}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
-              target.enabled ? "bg-emerald-500 dark:bg-emerald-600" : "bg-slate-300 dark:bg-slate-600"
-            }`}
+            className={switchClass(target.enabled)}
           >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                target.enabled ? "translate-x-4" : "translate-x-0.5"
-              }`}
-            />
+            <span className={switchKnobClass(target.enabled)} />
           </button>
         </div>
       </div>
@@ -71,7 +103,9 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
       <div className="flex-1 overflow-auto px-3 py-2">
         {/* 折线图 */}
         <div className="mb-3">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">延迟趋势（最近 60 次）</div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 whitespace-nowrap">
+            延迟趋势（最近 60 次）
+          </div>
           <div className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1">
             <LatencyChart data={target.history} avg={target.avg_rtt_ms} />
           </div>
@@ -79,7 +113,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
 
         {/* 统计 */}
         <div className="mb-3 text-[12px]">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">统计</div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1 whitespace-nowrap">统计</div>
           <div className="rounded border border-slate-200 dark:border-slate-700 p-2 grid grid-cols-2 gap-x-4">
             <Stat label="状态" value={statusLabel(target.status)} />
             <Stat label="TTL" value={target.ttl ?? "-"} />
@@ -113,28 +147,55 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled
 
         {/* 日志 */}
         <div className="text-[12px]">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-            最近日志（失败 / 恢复事件）
+          {/* 标题行：条数 + 单主机「记录事件」开关
+              （未读故障红点标在左侧主机列表的备注名旁，此处不重复） */}
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                最近日志（{logs.length}）
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                记录事件
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={target.events_on}
+                title="为该主机记录事件（关闭后不再产生事件）"
+                onClick={() => onToggleEvents(target.id, !target.events_on)}
+                className={switchClass(target.events_on)}
+              >
+                <span className={switchKnobClass(target.events_on)} />
+              </button>
+            </div>
           </div>
+
+          {/* 操作按钮行：复制 / 导出 CSV / 清空（三个独立入口，不合并不隐藏） */}
+          <div className="flex items-center justify-end gap-1 mb-1">
+            <button className={chip} onClick={onCopy} disabled={logs.length === 0}>
+              复制
+            </button>
+            <button className={chip} onClick={onExportCsv} disabled={logs.length === 0}>
+              导出 CSV
+            </button>
+            <button className={chipDanger} onClick={onClear} disabled={logs.length === 0}>
+              清空
+            </button>
+          </div>
+
           <div className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 max-h-48 overflow-auto">
             {logs.length === 0 ? (
-              <div className="px-2 py-3 text-center text-slate-400 text-[11px]">暂无事件</div>
+              <div className="px-2 py-3 text-center text-slate-400 text-[11px] whitespace-nowrap">
+                {recording ? "暂无事件" : "已关闭事件记录"}
+              </div>
             ) : (
               <ul className="divide-y divide-slate-100 dark:divide-slate-800 font-mono text-[11px]">
-                {logs.map((l, i) => (
-                  <li key={i} className="px-2 py-1 flex gap-2">
-                    <span className="text-slate-400">{fmtTime(l.ts)}</span>
-                    <span
-                      className={
-                        l.kind === "fail"
-                          ? "text-red-600 dark:text-red-400"
-                          : l.kind === "recover"
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-slate-600 dark:text-slate-300"
-                      }
-                    >
-                      {l.text}
-                    </span>
+                {logs.map((l) => (
+                  <li key={l.seq} className="px-2 py-1 flex gap-2">
+                    <span className="text-slate-400 shrink-0">{fmtTime(l.ts)}</span>
+                    <span className={`whitespace-nowrap ${eventColorClass(l.kind)}`}>{l.text}</span>
                   </li>
                 ))}
               </ul>

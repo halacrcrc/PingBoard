@@ -39,6 +39,8 @@ export interface TargetTableProps {
   /** 表头全选/全不选（仅作用当前传入的 targets） */
   onToggleSelectAll: (selectAll: boolean) => void;
   historyLen: number;
+  /** 有新故障事件未查看的目标 id —— 在备注名右侧显示红点，点开该主机后消失 */
+  unreadIds: Set<number>;
 }
 
 interface Col {
@@ -105,6 +107,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
   onToggleSelect,
   onToggleSelectAll,
   historyLen,
+  unreadIds,
 }) => {
   const headCheckRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -187,8 +190,20 @@ const TargetTable: React.FC<TargetTableProps> = ({
                     title="选择此行"
                   />
                 </td>
-                <td className="px-2 py-1 font-medium truncate max-w-[220px]" title={t.name}>
-                  {t.name || <span className="text-slate-400">（未命名）</span>}
+                <td className="px-2 py-1 font-medium" title={t.name}>
+                  <div className="flex items-center gap-2 min-w-0 max-w-[220px]">
+                    <span className="truncate min-w-0">
+                      {t.name || <span className="text-slate-400">（未命名）</span>}
+                    </span>
+                    {unreadIds.has(t.id) && (
+                      <span
+                        role="img"
+                        aria-label="有新故障事件未查看"
+                        title="有新故障事件未查看"
+                        className="w-2 h-2 rounded-full bg-red-600 dark:bg-red-500 shrink-0"
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="px-2 py-1 font-mono truncate max-w-[240px]" title={t.host}>
                   {t.host}

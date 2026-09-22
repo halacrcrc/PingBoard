@@ -75,6 +75,17 @@ pub fn normalize_settings(s: &mut PingSettings) {
     s.ttl = s.ttl.clamp(1, 255);
     s.max_threads = s.max_threads.clamp(1, 1024);
     s.history_len = s.history_len.clamp(10, 600);
+    // 每主机保留条数只允许 50 / 200 / 1000，其余一律归一到默认 200
+    s.events_keep = match s.events_keep {
+        50 | 200 | 1000 => s.events_keep,
+        _ => crate::events::DEFAULT_EVENTS_KEEP,
+    };
+    // 事件目录：trim 后空串归一为 None；不校验路径存在性（不可写时运行期降级）
+    s.events_dir = s
+        .events_dir
+        .as_ref()
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty());
 }
 
 #[cfg(test)]
@@ -160,6 +171,11 @@ mod tests {
             beep_on_fail: false,
             auto_start: false,
             history_len: 1,
+            events_on: true,
+            events_level: crate::events::EventLevel::Standard,
+            events_persist: true,
+            events_dir: None,
+            events_keep: 200,
         };
         normalize_settings(&mut s);
         assert_eq!(s.interval_ms, 100);
@@ -267,6 +283,11 @@ mod tests {
             beep_on_fail: true,
             auto_start: true,
             history_len: usize::MAX,
+            events_on: true,
+            events_level: crate::events::EventLevel::Standard,
+            events_persist: true,
+            events_dir: None,
+            events_keep: 123, // 非法值 → 归一到 200
         };
         normalize_settings(&mut s);
         assert_eq!(s.interval_ms, 600_000);
@@ -276,6 +297,7 @@ mod tests {
         assert_eq!(s.ttl, 200, "合法 TTL 不应被改动");
         assert_eq!(s.max_threads, 1024);
         assert_eq!(s.history_len, 600);
+        assert_eq!(s.events_keep, 200, "非法 events_keep 应归一到 200");
 
         // 合法值不应被改动
         let mut ok = PingSettings::default();
@@ -286,6 +308,27 @@ mod tests {
         assert_eq!(ok.ttl, 128);
         assert_eq!(ok.max_threads, 256);
         assert_eq!(ok.history_len, 60);
+        assert_eq!(ok.events_keep, 200, "默认 events_keep 应为 200");
+    }
+
+    /// events_dir 归一：空串 / 纯空白 → None；非空 trim 后保留
+    #[test]
+    fn qa_normalize_events_dir() {
+        let mut s = PingSettings::default();
+        s.events_dir = Some("   ".to_string());
+        normalize_settings(&mut s);
+        assert!(s.events_dir.is_none(), "纯空白目录应归一为 None");
+
+        s.events_dir = Some("  D:\\pb-events  ".to_string());
+        normalize_settings(&mut s);
+        assert_eq!(s.events_dir.as_deref(), Some("D:\\pb-events"), "应 trim 保留");
+
+        // 合法 events_keep 不被篡改
+        for k in [50usize, 200, 1000] {
+            s.events_keep = k;
+            normalize_settings(&mut s);
+            assert_eq!(s.events_keep, k, "合法 keep={} 不应被改动", k);
+        }
     }
 
     /// push_history 在 len == 0 时不裁剪也不 panic

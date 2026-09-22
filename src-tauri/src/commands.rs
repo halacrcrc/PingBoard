@@ -1,8 +1,9 @@
 // Tauri 命令层：前端 invoke 的入口，全部返回 Result<T, String>
 use tauri::{AppHandle, State};
 
+use crate::events::LogEvent;
 use crate::model::{PingSettings, Snapshot, TargetEntry, TargetState};
-use crate::state::AppState;
+use crate::state::{AppState, StopReason};
 use crate::{config, export};
 
 /// 获取完整聚合快照
@@ -69,13 +70,13 @@ pub async fn start_pinging(
     state.start(ids)
 }
 
-/// 停止 Ping；ids 为 null 表示全部
+/// 停止 Ping；ids 为 null 表示全部（用户主动停止 → 产生 stop 事件）
 #[tauri::command]
 pub async fn stop_pinging(
     state: State<'_, AppState>,
     ids: Option<Vec<u64>>,
 ) -> Result<(), String> {
-    state.stop(ids);
+    state.stop(ids, StopReason::User);
     Ok(())
 }
 
@@ -135,4 +136,45 @@ pub async fn export_report(
 #[tauri::command]
 pub async fn get_config_path(app: AppHandle) -> Result<String, String> {
     config::config_path(&app).map(|p| p.to_string_lossy().to_string())
+}
+
+/// 读取某主机的最近事件（选中主机回填），按新→旧返回
+#[tauri::command]
+pub async fn list_events(
+    state: State<'_, AppState>,
+    target_id: u64,
+    limit: usize,
+) -> Result<Vec<LogEvent>, String> {
+    Ok(state.list_events(target_id, limit))
+}
+
+/// 清空某主机的事件（内存 + 文件重写）
+#[tauri::command]
+pub async fn clear_events(state: State<'_, AppState>, target_id: u64) -> Result<(), String> {
+    state.clear_events(target_id);
+    Ok(())
+}
+
+/// 导出事件为 CSV（本地时间列）；target_id 为 null 表示导出全部主机
+#[tauri::command]
+pub async fn export_events(
+    state: State<'_, AppState>,
+    path: String,
+    target_id: Option<u64>,
+    tz_offset_minutes: i64,
+) -> Result<(), String> {
+    let events = state.collect_events(target_id);
+    export::write_events_csv(&path, &events, tz_offset_minutes)
+}
+
+/// 设置单主机「记录事件」开关并持久化
+#[tauri::command]
+pub async fn set_target_events(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: u64,
+    events_on: bool,
+) -> Result<(), String> {
+    state.set_target_events(id, events_on)?;
+    state.save_config(&app)
 }

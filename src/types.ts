@@ -26,6 +26,8 @@ export interface TargetState {
   history: (number | null)[];
   running: boolean;
   last_error: string | null;
+  /** 是否记录该主机的事件（运行时单主机开关） */
+  events_on: boolean;
 }
 
 /** Ping 设置（对应 Rust 的 PingSettings） */
@@ -40,6 +42,16 @@ export interface PingSettings {
   beep_on_fail: boolean;
   auto_start: boolean;
   history_len: number;
+  /** 事件日志总开关（关闭后不再生成任何事件） */
+  events_on: boolean;
+  /** 事件展示等级 */
+  events_level: EventLevel;
+  /** 是否把事件持久化到文件 */
+  events_persist: boolean;
+  /** 事件保存目录（null 表示使用默认 app_config_dir） */
+  events_dir: string | null;
+  /** 每主机保留条数（50 / 200 / 1000） */
+  events_keep: number;
 }
 
 /** 聚合快照（对应 Rust 的 Snapshot），既用于 ping-snapshot 事件也用于 get_state 命令 */
@@ -54,6 +66,8 @@ export interface Snapshot {
   loss_pct: number;
   started_at: number | null;
   updated_at: number;
+  /** 自上次快照以来新增的事件（增量，空闲为 []） */
+  events: LogEvent[];
 }
 
 /** 新增目标条目（对应 Rust 的 TargetEntry） */
@@ -67,9 +81,28 @@ export type ImportPayload =
   | { kind: "text"; text: string }
   | { kind: "table"; rows: string[][] };
 
-/** 详情面板日志条目 */
-export interface LogEntry {
+/** 事件类型（对应 Rust 的 EventKind，snake_case） */
+export type EventKind =
+  | "fault"
+  | "unreachable"
+  | "dns_fail"
+  | "recover"
+  | "first_ok"
+  | "start"
+  | "stop"
+  | "config_change";
+
+/** 事件等级（对应 Rust 的 EventLevel） */
+export type EventLevel = "fault" | "standard" | "detail";
+
+/** 事件日志条目（对应 Rust 的 LogEvent） */
+export interface LogEvent {
+  seq: number;
   ts: number;
+  target_id: number;
+  target_name: string;
+  target_host: string;
+  kind: EventKind;
+  level: EventLevel;
   text: string;
-  kind: "fail" | "recover" | "info";
 }

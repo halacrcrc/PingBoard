@@ -1,5 +1,5 @@
 // 展示层格式化工具（纯函数）
-import type { Status } from "../types";
+import type { EventKind, Status } from "../types";
 
 /** 格式化延迟（毫秒），保留 1 位小数；null 显示为 "-" */
 export function fmtMs(v: number | null | undefined): string {
@@ -89,4 +89,48 @@ export function statusBadgeClass(s: Status): string {
     default:
       return "bg-slate-400 text-white";
   }
+}
+
+/** 事件类型文字颜色：故障类红 / 恢复类绿 / 其余灰 */
+export function eventColorClass(kind: EventKind): string {
+  switch (kind) {
+    case "fault":
+    case "unreachable":
+    case "dns_fail":
+      return "text-red-600 dark:text-red-400";
+    case "recover":
+    case "first_ok":
+      return "text-emerald-600 dark:text-emerald-400";
+    default:
+      return "text-slate-600 dark:text-slate-300";
+  }
+}
+
+/** 事件类型中文标签（用于复制 / 展示） */
+export function eventKindLabel(kind: EventKind): string {
+  switch (kind) {
+    case "fault":
+      return "故障";
+    case "unreachable":
+      return "无法连通";
+    case "dns_fail":
+      return "解析失败";
+    case "recover":
+      return "已恢复";
+    case "first_ok":
+      return "首次连通";
+    case "start":
+      return "开始探测";
+    case "stop":
+      return "已停止";
+    case "config_change":
+      return "配置变更";
+    default:
+      return "事件";
+  }
+}
+
+/** 是否属于「未读故障红点」计入的故障类型（不含 recover） */
+export function isUnreadKind(kind: EventKind): boolean {
+  return kind === "fault" || kind === "unreachable" || kind === "dns_fail";
 }

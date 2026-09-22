@@ -1,6 +1,7 @@
 // 设置对话框：暴露全部 PingSettings，含输入校验，保存后立即生效
 import React from "react";
-import type { PingSettings } from "../types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type { EventLevel, PingSettings } from "../types";
 import * as api from "../lib/api";
 
 export interface SettingsDialogProps {
@@ -36,6 +37,18 @@ const HARD_MAX_THREADS = 4096;
 const MAX_THREADS_MIN = 1;
 const MAX_THREADS_MAX = 1024;
 
+/** 事件等级三选一（含各档包含的事件说明） */
+const LEVEL_OPTIONS: { value: EventLevel; label: string; desc: string }[] = [
+  { value: "fault", label: "仅故障", desc: "故障 / 无法连通 / 解析失败 / 恢复" },
+  { value: "standard", label: "标准", desc: "故障 + 首次连通 / 开始 / 停止（默认）" },
+  { value: "detail", label: "详细", desc: "标准 + 配置变更" },
+];
+/** 每主机保留条数三选一 */
+const KEEP_OPTIONS: number[] = [50, 200, 1000];
+/** 设置内的小按钮样式（禁止折行 / 压缩） */
+const smallBtn =
+  "h-7 px-2 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed";
+
 const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose, onSaved }) => {
   const [draft, setDraft] = React.useState<PingSettings>(settings);
   const [error, setError] = React.useState<string | null>(null);
@@ -65,6 +78,18 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
     setDraft((d) => ({ ...d, [key]: Number.isNaN(n) ? 0 : n }));
   };
 
+  /** 选择事件保存目录（系统文件夹选择对话框） */
+  const chooseDir = async () => {
+    try {
+      const picked = await openDialog({ directory: true, multiple: false, title: "选择事件保存目录" });
+      if (typeof picked === "string" && picked) {
+        setDraft((d) => ({ ...d, events_dir: picked }));
+      }
+    } catch {
+      /* 取消或权限异常：忽略，保持原值 */
+    }
+  };
+
   const save = async () => {
     // 前端校验（后端也会再校验一次）
     const checks: [keyof PingSettings, number, number, string][] = [
@@ -81,6 +106,11 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
         setError(msg);
         return;
       }
+    }
+    // 事件保留条数须为 50 / 200 / 1000
+    if (!KEEP_OPTIONS.includes(draft.events_keep)) {
+      setError("每主机保留条数须为 50 / 200 / 1000");
+      return;
     }
     setBusy(true);
     setError(null);
@@ -180,6 +210,111 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
               每台主机会占用 1 个系统线程 + 1 个 ICMP 句柄。开启上限时按「最大线程数」拦截，可防止误加大量主机拖慢系统；
               关闭后不再限制（仅保留 {HARD_MAX_THREADS} 硬保护）——200 台以内影响很小，500 台以上线程调度、内存与界面刷新开销会明显上升，
               1000 台以上建议保持开启并分批启动。
+            </p>
+          </div>
+
+          {/* 事件日志分组 */}
+          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+            <div className="mb-2 font-medium text-slate-700 dark:text-slate-200">事件日志</div>
+            <table className="w-full">
+              <tbody>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">启用事件日志</td>
+                  <td className="py-1.5">
+                    <input
+                      type="checkbox"
+                      className="accent-emerald-600 w-4 h-4"
+                      checked={draft.events_on}
+                      onChange={(e) => setDraft((d) => ({ ...d, events_on: e.target.checked }))}
+                    />
+                    <span className="ml-2 text-[11px] text-slate-400 whitespace-nowrap">
+                      总开关，关闭后不再产生任何事件
+                    </span>
+                  </td>
+                </tr>
+                <tr className="align-top">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">事件等级</td>
+                  <td className="py-1.5">
+                    <div className="flex flex-col gap-1">
+                      {LEVEL_OPTIONS.map((o) => (
+                        <label key={o.value} className="flex items-start gap-1.5 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="events_level"
+                            className="accent-sky-600 w-4 h-4 mt-0.5"
+                            checked={draft.events_level === o.value}
+                            onChange={() => setDraft((d) => ({ ...d, events_level: o.value }))}
+                          />
+                          <span className="text-slate-700 dark:text-slate-200 whitespace-nowrap">{o.label}</span>
+                          <span className="text-[11px] text-slate-400">{o.desc}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">保存事件到文件</td>
+                  <td className="py-1.5">
+                    <input
+                      type="checkbox"
+                      className="accent-emerald-600 w-4 h-4"
+                      checked={draft.events_persist}
+                      onChange={(e) => setDraft((d) => ({ ...d, events_persist: e.target.checked }))}
+                    />
+                    <span className="ml-2 text-[11px] text-slate-400 whitespace-nowrap">
+                      默认保存到配置目录下的 pingboard-events.jsonl
+                    </span>
+                  </td>
+                </tr>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">事件保存目录</td>
+                  <td className="py-1.5">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="flex-1 min-w-0 h-7 px-2 rounded border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 leading-7 truncate text-[12px]"
+                        title={draft.events_dir ?? "（默认：配置目录）"}
+                      >
+                        {draft.events_dir ?? "（默认：配置目录）"}
+                      </div>
+                      <button type="button" className={smallBtn} onClick={chooseDir}>
+                        选择…
+                      </button>
+                      <button
+                        type="button"
+                        className={smallBtn}
+                        onClick={() => setDraft((d) => ({ ...d, events_dir: null }))}
+                        disabled={draft.events_dir === null}
+                      >
+                        恢复默认
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                <tr className="align-middle">
+                  <td className="py-1.5 pr-3 w-40 text-slate-600 dark:text-slate-300">每主机保留条数</td>
+                  <td className="py-1.5">
+                    <div className="flex items-center gap-3">
+                      {KEEP_OPTIONS.map((k) => (
+                        <label key={k} className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="radio"
+                            name="events_keep"
+                            className="accent-sky-600 w-4 h-4"
+                            checked={draft.events_keep === k}
+                            onChange={() => setDraft((d) => ({ ...d, events_keep: k }))}
+                          />
+                          <span className="text-slate-700 dark:text-slate-200">{k}</span>
+                        </label>
+                      ))}
+                      <span className="text-[11px] text-slate-400 whitespace-nowrap">条/主机</span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400 dark:text-slate-500">
+              事件在探测状态迁移时产生，按等级过滤展示；「仅故障」最简洁，「详细」额外记录配置变更。
+              历史文件在应用启动时读回（每主机只取最近「保留条数」条）。
             </p>
           </div>
 

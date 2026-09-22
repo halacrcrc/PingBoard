@@ -1,6 +1,7 @@
 // PingBoard 后端入口：装配插件、状态、命令与后台任务
 mod commands;
 mod config;
+mod events;
 mod export;
 mod import;
 mod model;
@@ -29,6 +30,10 @@ pub fn run() {
             commands::export_report,
             commands::get_config_path,
             import::read_import_file,
+            commands::list_events,
+            commands::clear_events,
+            commands::export_events,
+            commands::set_target_events,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -38,6 +43,13 @@ pub fn run() {
             {
                 let st = app.state::<state::AppState>();
                 st.init_from_config(&cfg);
+            }
+
+            // 1.1) 事件日志：注入默认目录、应用持久化配置并读回历史
+            if let Ok(base_dir) = config::app_config_dir(&handle) {
+                let st = app.state::<state::AppState>();
+                st.configure_events(base_dir);
+                st.load_events_from_file();
             }
 
             // 2) 启动聚合快照发射任务（每 500ms 一次）

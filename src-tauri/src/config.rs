@@ -10,13 +10,16 @@ use crate::stats;
 /// 配置文件名
 pub const CONFIG_FILE: &str = "pingboard-config.json";
 
+/// 应用配置目录（`%APPDATA%\com.pingboard.desktop\`）
+pub fn app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_config_dir()
+        .map_err(|e| format!("无法获取配置目录：{}", e))
+}
+
 /// 解析配置文件完整路径
 pub fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| format!("无法获取配置目录：{}", e))?;
-    Ok(dir.join(CONFIG_FILE))
+    Ok(app_config_dir(app)?.join(CONFIG_FILE))
 }
 
 /// 读取配置：文件不存在或解析失败一律回退到默认值，绝不 panic / 阻塞启动

@@ -1,4 +1,5 @@
 // 报表导出：csv / txt / html，均在 Rust 侧写文件
+use crate::events::LogEvent;
 use crate::model::{Status, TargetState};
 
 /// 导出报表到指定路径
@@ -9,6 +10,16 @@ pub fn write_report(path: &str, format: &str, targets: &[TargetState]) -> Result
         "html" => to_html(targets),
         other => return Err(format!("不支持的导出格式：{}（可选 csv / txt / html）", other)),
     };
+    std::fs::write(path, content).map_err(|e| format!("写入文件失败：{}（{}）", e, path))
+}
+
+/// 导出事件为 CSV（「时间(本地)」列按 `tz_offset_minutes` 偏移）
+pub fn write_events_csv(
+    path: &str,
+    events: &[LogEvent],
+    tz_offset_minutes: i64,
+) -> Result<(), String> {
+    let content = to_events_csv(events, tz_offset_minutes);
     std::fs::write(path, content).map_err(|e| format!("写入文件失败：{}（{}）", e, path))
 }
 
@@ -103,6 +114,32 @@ fn to_csv(targets: &[TargetState]) -> String {
         ));
     }
     out
+}
+
+/// 生成事件 CSV（带 UTF-8 BOM；时间列为**本地时间**）
+fn to_events_csv(events: &[LogEvent], tz_offset_minutes: i64) -> String {
+    let mut out = String::from("\u{feff}");
+    out.push_str("序号,时间(本地),主机,备注,事件类型,等级,说明\n");
+    for (i, e) in events.iter().enumerate() {
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{}\n",
+            i + 1,
+            esc_csv(&fmt_time_local(e.ts, tz_offset_minutes)),
+            esc_csv(&e.target_host),
+            esc_csv(&e.target_name),
+            esc_csv(e.kind.label()),
+            esc_csv(e.level.label()),
+            esc_csv(&e.text),
+        ));
+    }
+    out
+}
+
+/// 纪元毫秒 → 本地时间字符串：在既有 UTC 民用历算法上叠加时区偏移（东 8 区取 +480 分钟）
+fn fmt_time_local(ms: u64, tz_offset_minutes: i64) -> String {
+    let shifted = ms as i64 + tz_offset_minutes.saturating_mul(60_000);
+    let shifted = if shifted < 0 { 0 } else { shifted as u64 };
+    fmt_time_utc(Some(shifted))
 }
 
 /// 生成纯文本报表
@@ -380,5 +417,63 @@ mod tests {
         assert_eq!(opt_num(None), "");
         assert_eq!(opt_num(Some(f64::NAN)), "");
         assert_eq!(opt_num(Some(12.34)), "12.3");
+    }
+
+    /* ===================== 事件 CSV ===================== */
+
+    fn sample_event(seq: u64, host: &str, name: &str, kind: crate::events::EventKind) -> LogEvent {
+        LogEvent {
+            seq,
+            ts: 1_700_000_000_000,
+            target_id: 1,
+            target_name: name.to_string(),
+            target_host: host.to_string(),
+            kind,
+            level: crate::events::EventLevel::for_kind(kind),
+            text: "测试,带逗号".to_string(),
+        }
+    }
+
+    /// 事件 CSV：BOM + 7 列表头 + 本地时间列 + 转义
+    #[test]
+    fn qa_events_csv_real_file() {
+        use crate::events::EventKind;
+
+        let dir = qa_dir();
+        let path = dir.join("events.csv");
+        let p = path.to_string_lossy().to_string();
+        let events = vec![
+            sample_event(1, "223.5.5.5", "阿里, DNS", EventKind::Fault),
+            sample_event(2, "www.baidu.com", "百度", EventKind::Recover),
+        ];
+        // 东 8 区
+        write_events_csv(&p, &events, 480).expect("写事件 CSV 失败");
+
+        let bytes = std::fs::read(&path).expect("读回事件 CSV 失败");
+        assert_eq!(&bytes[0..3], &[0xEF, 0xBB, 0xBF], "事件 CSV 必须以 UTF-8 BOM 开头");
+        let text = String::from_utf8(bytes).unwrap();
+        let body = text.trim_start_matches('\u{feff}');
+        let lines: Vec<&str> = body.trim_end().split('\n').collect();
+        assert_eq!(lines.len(), 3, "表头 + 2 行数据");
+        assert!(lines[0].contains("时间(本地)"), "表头必须标注「时间(本地)」");
+        assert_eq!(count_csv_fields(lines[0]), 7, "事件 CSV 应为 7 列");
+        for (i, l) in lines[1..].iter().enumerate() {
+            assert_eq!(count_csv_fields(l), 7, "第 {} 行列数不一致", i + 1);
+        }
+        assert!(body.contains("\"阿里, DNS\""), "含逗号字段应被引号包裹");
+        assert!(body.contains("\"测试,带逗号\""), "说明字段含逗号应被转义");
+        assert!(body.contains("故障"));
+        assert!(body.contains("已恢复"));
+        // 本地时间：东 8 区应为 2023-11-15 06:13:20
+        assert!(body.contains("2023-11-15 06:13:20"), "应为本地时间：{}", body);
+    }
+
+    /// 时区偏移换算：0 → UTC；+480 → +8h；-480 → -8h
+    #[test]
+    fn qa_fmt_time_local_offsets() {
+        let ts = 1_700_000_000_000u64;
+        assert_eq!(fmt_time_local(ts, 0), "2023-11-14 22:13:20", "0 偏移即 UTC");
+        assert_eq!(fmt_time_local(ts, 480), "2023-11-15 06:13:20", "东 8 区 +8h");
+        assert_eq!(fmt_time_local(ts, -480), "2023-11-14 14:13:20", "西 8 区 -8h");
     }
 }

@@ -3,8 +3,9 @@ import React from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { LogEntry, PingSettings, Snapshot, Status, TargetEntry } from "./types";
+import type { EventLevel, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
+import { fmtTime, isUnreadKind } from "./lib/format";
 import Toolbar from "./components/Toolbar";
 import TargetTable, { type SortKey } from "./components/TargetTable";
 import StatusBar from "./components/StatusBar";
@@ -24,6 +25,11 @@ const DEFAULT_SETTINGS: PingSettings = {
   beep_on_fail: false,
   auto_start: false,
   history_len: 60,
+  events_on: true,
+  events_level: "standard",
+  events_persist: true,
+  events_dir: null,
+  events_keep: 200,
 };
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -37,7 +43,40 @@ const EMPTY_SNAPSHOT: Snapshot = {
   loss_pct: 0,
   started_at: null,
   updated_at: 0,
+  events: [],
 };
+
+/** 事件等级排序（与 Rust EventLevel::rank 一致）：值越小越严重 */
+const LEVEL_RANK: Record<EventLevel, number> = { fault: 0, standard: 1, detail: 2 };
+
+/**
+ * 复制文本到剪贴板。WebView2 下 `navigator.clipboard` 可能抛 `NotAllowedError`，
+ * 逐级降级：Clipboard API → 隐藏 textarea + `execCommand('copy')`；仍失败则抛出。
+ */
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    throw new Error("clipboard unavailable");
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    try {
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      if (!ok) throw new Error("execCommand copy failed");
+    } finally {
+      document.body.removeChild(ta);
+    }
+  }
+}
 
 /** 首次启动引导页展示的示例主机 */
 const SAMPLE_TARGETS: TargetEntry[] = [
@@ -62,75 +101,21 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = React.useState(false);
   const [sortKey, setSortKey] = React.useState<SortKey>("name");
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
-  const [logs, setLogs] = React.useState<Record<number, LogEntry[]>>({});
+  const [logs, setLogs] = React.useState<Record<number, LogEvent[]>>({});
+  const [unread, setUnread] = React.useState<Record<number, number>>({});
   const [toast, setToast] = React.useState<string | null>(null);
   const [confirmClear, setConfirmClear] = React.useState(false);
+  const [confirmClearLogs, setConfirmClearLogs] = React.useState(false);
 
-  const prevStatusRef = React.useRef<Record<number, Status>>({});
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   /** 保存 ping-snapshot 的取消订阅函数，卸载时判空 + 容错调用 */
   const unlistenRef = React.useRef<(() => void) | null>(null);
-
-  /* ------------------------- 事件订阅与初始化 ------------------------- */
-
-  React.useEffect(() => {
-    let disposed = false;
-    listen<Snapshot>("ping-snapshot", (e) => setSnapshot(e.payload))
-      .then((u) => {
-        if (disposed) {
-          // 订阅在清理之后才就绪：立即取消，并容错（资源可能已释放）
-          try {
-            u();
-          } catch {
-            /* 忽略 */
-          }
-        } else {
-          unlistenRef.current = u;
-        }
-      })
-      .catch(() => {
-        /* 订阅失败时静默忽略，不影响 get_state 兜底 */
-      });
-    api
-      .getState()
-      .then(setSnapshot)
-      .catch((e) => showToast(`初始化失败：${String(e)}`));
-    return () => {
-      disposed = true;
-      const u = unlistenRef.current;
-      unlistenRef.current = null;
-      // 仅在确实是函数时调用；卸载阶段底层资源可能已释放，用 try/catch 兜底
-      if (typeof u === "function") {
-        try {
-          u();
-        } catch {
-          /* 忽略卸载期清理异常 */
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  /* ------------------------- 主题 ------------------------- */
-
-  React.useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("pb-theme", theme);
-  }, [theme]);
-
-  /* ------------------------- 窗口标题 ------------------------- */
-
-  React.useEffect(() => {
-    const title = snapshot.running
-      ? `PingBoard — 运行中 (${snapshot.active_threads} 台)`
-      : "PingBoard — 多主机 Ping 监视器";
-    document.title = title;
-    getCurrentWindow()
-      .setTitle(title)
-      .catch(() => {
-        /* 无权限时静默忽略 */
-      });
-  }, [snapshot.running, snapshot.active_threads]);
+  /** 已处理的最大事件 seq（严格去重） */
+  const lastSeqRef = React.useRef(0);
+  /** 已从后端回填过历史的主机 id */
+  const loadedIdsRef = React.useRef<Set<number>>(new Set());
+  /** 供订阅回调读取当前主选主机（避免闭包过期） */
+  const primaryIdRef = React.useRef<number | null>(null);
 
   /* ------------------------- 提示音 ------------------------- */
 
@@ -154,57 +139,142 @@ const App: React.FC = () => {
     }
   }, []);
 
-  /* ------------------------- 状态迁移 → 日志 + 提示音 ------------------------- */
+  /* ------------------------- 事件增量消费 ------------------------- */
 
-  React.useEffect(() => {
-    const prev = prevStatusRef.current;
-    const next: Record<number, Status> = {};
-    const additions: Record<number, LogEntry> = {};
-
-    for (const t of snapshot.targets) {
-      next[t.id] = t.status;
-      const p = prev[t.id];
-      if (p && p !== t.status) {
-        const toFail = t.status === "timeout" || t.status === "failed";
-        const fromFail = p === "timeout" || p === "failed";
-        if (toFail && p === "ok") {
-          additions[t.id] = {
-            ts: Date.now(),
-            kind: "fail",
-            text:
-              t.status === "timeout"
-                ? `探测超时（连续 ${t.consecutive_fail} 次）`
-                : `探测失败${t.last_error ? "：" + t.last_error : ""}`,
-          };
-        } else if (t.status === "ok" && fromFail) {
-          additions[t.id] = {
-            ts: Date.now(),
-            kind: "recover",
-            text: `已恢复（${t.last_rtt_ms === null ? "-" : t.last_rtt_ms.toFixed(1)} ms）`,
-          };
+  // 快照到达：消费增量事件（seq 严格去重）→ 更新 logs / unread → 整体替换快照。
+  // 依赖仅 beep（稳定），保证订阅只挂一次。
+  const handleSnapshot = React.useCallback(
+    (snap: Snapshot) => {
+      const incoming = snap.events ?? [];
+      if (incoming.length > 0) {
+        const last = lastSeqRef.current;
+        const fresh = incoming.filter((ev) => ev.seq > last);
+        if (fresh.length > 0) {
+          lastSeqRef.current = fresh.reduce((m, ev) => Math.max(m, ev.seq), last);
+          const cap = snap.settings.events_keep || 200;
+          setLogs((prev) => {
+            const out: Record<number, LogEvent[]> = { ...prev };
+            for (const ev of fresh) {
+              const arr = out[ev.target_id] ? [...out[ev.target_id]] : [];
+              arr.unshift(ev);
+              out[ev.target_id] = arr.slice(0, cap);
+            }
+            return out;
+          });
+          const primary = primaryIdRef.current;
+          setUnread((prev) => {
+            let changed = false;
+            const out = { ...prev };
+            for (const ev of fresh) {
+              // 仅非选中主机的「故障级」计入未读（recover 不计）
+              if (ev.target_id !== primary && isUnreadKind(ev.kind)) {
+                out[ev.target_id] = (out[ev.target_id] ?? 0) + 1;
+                changed = true;
+              }
+            }
+            return changed ? out : prev;
+          });
+          if (snap.settings.beep_on_fail && fresh.some((ev) => isUnreadKind(ev.kind))) {
+            beep();
+          }
         }
       }
-    }
-    prevStatusRef.current = next;
+      setSnapshot(snap);
+    },
+    [beep]
+  );
 
-    const keys = Object.keys(additions);
-    if (keys.length === 0) return;
+  /* ------------------------- 事件订阅与初始化 ------------------------- */
 
-    setLogs((prevLogs) => {
-      const out: Record<number, LogEntry[]> = { ...prevLogs };
-      for (const k of keys) {
-        const id = Number(k);
-        const arr = out[id] ? [...out[id]] : [];
-        arr.unshift(additions[id]);
-        out[id] = arr.slice(0, 50);
+  React.useEffect(() => {
+    let disposed = false;
+    listen<Snapshot>("ping-snapshot", (e) => handleSnapshot(e.payload))
+      .then((u) => {
+        if (disposed) {
+          // 订阅在清理之后才就绪：立即取消，并容错（资源可能已释放）
+          try {
+            u();
+          } catch {
+            /* 忽略 */
+          }
+        } else {
+          unlistenRef.current = u;
+        }
+      })
+      .catch(() => {
+        /* 订阅失败时静默忽略，不影响 get_state 兜底 */
+      });
+    api
+      .getState()
+      .then(handleSnapshot)
+      .catch((e) => showToast(`初始化失败：${String(e)}`));
+    return () => {
+      disposed = true;
+      const u = unlistenRef.current;
+      unlistenRef.current = null;
+      // 仅在确实是函数时调用；卸载阶段底层资源可能已释放，用 try/catch 兜底
+      if (typeof u === "function") {
+        try {
+          u();
+        } catch {
+          /* 忽略卸载期清理异常 */
+        }
       }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleSnapshot]);
+
+  /* ------------------------- 主题 ------------------------- */
+
+  React.useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("pb-theme", theme);
+  }, [theme]);
+
+  /* ------------------------- 窗口标题 ------------------------- */
+
+  React.useEffect(() => {
+    const title = snapshot.running
+      ? `PingBoard — 运行中 (${snapshot.active_threads} 台)`
+      : "PingBoard — 多主机 Ping 监视器";
+    document.title = title;
+    getCurrentWindow()
+      .setTitle(title)
+      .catch(() => {
+        /* 无权限时静默忽略 */
+      });
+  }, [snapshot.running, snapshot.active_threads]);
+
+  /* ------------------------- 主选主机同步 / 历史回填 / 未读清零 ------------------------- */
+
+  // 同步主选 id 到 ref（供订阅回调读取，避免闭包过期）
+  React.useEffect(() => {
+    primaryIdRef.current = primaryId;
+  }, [primaryId]);
+
+  // 选中主机：首访懒回填历史（新→旧）；每次切换都清零该主机未读
+  React.useEffect(() => {
+    if (primaryId === null) return;
+    if (!loadedIdsRef.current.has(primaryId)) {
+      loadedIdsRef.current.add(primaryId);
+      const keep = snapshot.settings.events_keep || 200;
+      api
+        .listEvents(primaryId, keep)
+        .then((hist) => {
+          setLogs((prev) => ({ ...prev, [primaryId]: hist }));
+        })
+        .catch(() => {
+          /* 回填失败：保留实时增量，静默忽略 */
+        });
+    }
+    setUnread((prev) => {
+      if (!prev[primaryId]) return prev;
+      const out = { ...prev };
+      delete out[primaryId];
       return out;
     });
-
-    if (snapshot.settings.beep_on_fail && keys.some((k) => additions[Number(k)].kind === "fail")) {
-      beep();
-    }
-  }, [snapshot, beep]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryId]);
 
   /* ------------------------- 提示条 ------------------------- */
 
@@ -234,6 +304,60 @@ const App: React.FC = () => {
     const t = snapshot.targets.find((x) => x.id === id);
     if (!t) return;
     guard(() => api.updateTarget(id, t.name, t.host, enabled));
+  };
+
+  /** 切换单主机「记录事件」开关（走独立命令，避免全量更新副作用） */
+  const handleToggleEvents = (id: number, eventsOn: boolean) => {
+    guard(() => api.setTargetEvents(id, eventsOn));
+  };
+
+  /** 复制当前可见日志（带降级链） */
+  const handleCopyLogs = () => {
+    const text = visiblePrimaryLogs.map((l) => `${fmtTime(l.ts)}\t${l.text}`).join("\n");
+    if (!text) return;
+    copyToClipboard(text)
+      .then(() => showToast("已复制日志"))
+      .catch(() => showToast("复制失败，请手动选择"));
+  };
+
+  /** 导出当前选中的主机日志为 CSV（本地时间列） */
+  const handleExportCsv = async () => {
+    const t = primaryTarget;
+    if (!t) return;
+    try {
+      const safeName = (t.name || t.host).replace(/[\\/:*?"<>|]/g, "_");
+      const path = await save({
+        defaultPath: `pingboard-events-${safeName}.csv`,
+        filters: [{ name: "CSV 文件", extensions: ["csv"] }],
+      });
+      if (!path) return;
+      const tz = -new Date().getTimezoneOffset();
+      await api.exportEvents(path, t.id, tz);
+      showToast(`已导出：${path}`);
+    } catch (e) {
+      showToast(`导出失败：${String(e)}`);
+    }
+  };
+
+  /** 打开「清空事件日志」确认框 */
+  const handleClearLogs = () => {
+    if (primaryId !== null) setConfirmClearLogs(true);
+  };
+
+  /** 确认清空当前主机日志（内存 + 文件） */
+  const doClearLogs = () => {
+    setConfirmClearLogs(false);
+    const id = primaryId;
+    if (id === null) return;
+    guard(() => api.clearEvents(id)).then(() => {
+      setLogs((prev) => ({ ...prev, [id]: [] }));
+      setUnread((prev) => {
+        if (!prev[id]) return prev;
+        const out = { ...prev };
+        delete out[id];
+        return out;
+      });
+    });
   };
 
   const handleSort = (key: SortKey) => {
@@ -280,6 +404,12 @@ const App: React.FC = () => {
         for (const id of ids) delete out[id];
         return out;
       });
+      setUnread((prevUnread) => {
+        const out = { ...prevUnread };
+        for (const id of ids) delete out[id];
+        return out;
+      });
+      for (const id of ids) loadedIdsRef.current.delete(id);
     });
   }, [selected, guard]);
 
@@ -339,6 +469,19 @@ const App: React.FC = () => {
 
   const primaryLogs = primaryId !== null ? logs[primaryId] ?? [] : [];
 
+  // 按当前事件等级过滤（等级->展示时过滤，改等级历史事件立即显隐）
+  const visiblePrimaryLogs = React.useMemo(() => {
+    const rank = LEVEL_RANK[snapshot.settings.events_level] ?? 1;
+    return primaryLogs.filter((ev) => (LEVEL_RANK[ev.level] ?? 0) <= rank);
+  }, [primaryLogs, snapshot.settings.events_level]);
+
+  // 未读故障：红点标在主机列表的备注名右侧（点开该主机即清零，见选中主机的 effect）。
+  // 必须用 useMemo 保持引用稳定，否则 TargetTable 的 React.memo 会被每帧击穿。
+  const unreadIds = React.useMemo(
+    () => new Set(Object.entries(unread).filter(([, n]) => n > 0).map(([k]) => Number(k))),
+    [unread]
+  );
+
   // 已有目标 host 列表（小写化），用于「添加主机」对话框的跨批次重复检测
   const existingHosts = React.useMemo(
     () => snapshot.targets.map((t) => t.host.toLowerCase()),
@@ -386,6 +529,8 @@ const App: React.FC = () => {
       setSelected(new Set());
       setPrimaryId(null);
       setLogs({});
+      setUnread({});
+      loadedIdsRef.current.clear();
     });
   };
 
@@ -464,12 +609,22 @@ const App: React.FC = () => {
               onToggleSelect={handleToggleSelect}
               onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
+              unreadIds={unreadIds}
             />
           )}
         </div>
 
         <div className="w-[420px] shrink-0 bg-white dark:bg-slate-900">
-          <DetailPanel target={primaryTarget} logs={primaryLogs} onToggleEnabled={handleToggleEnabled} />
+          <DetailPanel
+            target={primaryTarget}
+            logs={visiblePrimaryLogs}
+            globalEventsOn={snapshot.settings.events_on}
+            onToggleEnabled={handleToggleEnabled}
+            onToggleEvents={handleToggleEvents}
+            onCopy={handleCopyLogs}
+            onExportCsv={handleExportCsv}
+            onClear={handleClearLogs}
+          />
         </div>
       </div>
 
@@ -514,6 +669,22 @@ const App: React.FC = () => {
         }
         onConfirm={doClearList}
         onCancel={() => setConfirmClear(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmClearLogs}
+        title="清空事件日志"
+        danger
+        confirmText="清空日志"
+        message={
+          <>
+            确定要清空主机{" "}
+            <b>{primaryTarget ? primaryTarget.name || primaryTarget.host : ""}</b>{" "}
+            的事件日志吗？此操作会同时清除内存与已保存文件中的该主机事件，且无法撤销。
+          </>
+        }
+        onConfirm={doClearLogs}
+        onCancel={() => setConfirmClearLogs(false)}
       />
 
       {toast && (
