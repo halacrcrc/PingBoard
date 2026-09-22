@@ -461,7 +461,6 @@ const App: React.FC = () => {
               sortDir={sortDir}
               onSort={handleSort}
               onRowClick={handleRowClick}
-              onToggleEnabled={handleToggleEnabled}
               onToggleSelect={handleToggleSelect}
               onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
@@ -470,7 +469,7 @@ const App: React.FC = () => {
         </div>
 
         <div className="w-[420px] shrink-0 bg-white dark:bg-slate-900">
-          <DetailPanel target={primaryTarget} logs={primaryLogs} />
+          <DetailPanel target={primaryTarget} logs={primaryLogs} onToggleEnabled={handleToggleEnabled} />
         </div>
       </div>
 

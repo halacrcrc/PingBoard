@@ -113,7 +113,12 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <span className="font-semibold text-[15px] text-slate-800 dark:text-slate-100">
           PingBoard
         </span>
-        <span className="text-slate-400 dark:text-slate-500 text-xs whitespace-nowrap">
+        {/* 状态文字与左侧指示灯配色一致：运行中绿色、已停止灰色（绿=正常/活动） */}
+        <span
+          className={`text-xs whitespace-nowrap ${
+            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"
+          }`}
+        >
           {running ? (
             `运行中 ${activeCount} 台`
           ) : (

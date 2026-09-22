@@ -42,14 +42,21 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
   const [busy, setBusy] = React.useState(false);
   const [configPath, setConfigPath] = React.useState<string>("");
 
+  // 仅在对话框「刚刚打开」时把外部设置拷进本地草稿。
+  // ⚠️ 不能把 settings 放进依赖数组：App 每 500ms 推送一次快照，settings 每次都是新对象，
+  // 会让草稿被周期性重置（曾表现为「启用线程数上限」无法取消勾选）。
+  const wasOpenRef = React.useRef(false);
   React.useEffect(() => {
-    if (open) {
-      setDraft(settings);
-      setError(null);
-      setBusy(false);
-      api.getConfigPath().then(setConfigPath).catch(() => setConfigPath(""));
-    }
-  }, [open, settings]);
+    const justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!justOpened) return;
+    setDraft(settings);
+    setError(null);
+    setBusy(false);
+    api.getConfigPath().then(setConfigPath).catch(() => setConfigPath(""));
+    // 故意不写依赖数组：每次渲染后执行，但仅在 justOpened 时做事。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   if (!open) return null;
 

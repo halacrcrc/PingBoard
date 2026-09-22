@@ -319,9 +319,13 @@ impl AppState {
         Ok(())
     }
 
-    /// 停止 Ping；`ids` 为 None 表示停止全部
+    /// 停止 Ping；`ids` 为 None 表示停止全部，`Some` 只停指定 id
+    ///
+    /// 三阶段实现：先置位、立即更新可见状态、后台回收线程。
+    /// 命令本身**不 join 工作线程**——否则耗时 ≈ Σ(各线程退出时间)，N 台会累加到十几秒；
+    /// 现在无论目标多少都在毫秒级返回，不再随目标数增长。
     pub fn stop(&self, ids: Option<Vec<u64>>) {
-        // 先把句柄从表中摘出，避免在持锁状态下 join
+        // 1. 先把句柄从表中摘出（持锁时间极短，不在锁内 join）
         let handles: Vec<(u64, WorkerHandle)> = {
             let mut map = self.inner.workers.lock().unwrap();
             let keys: Vec<u64> = match &ids {
@@ -337,22 +341,35 @@ impl AppState {
             out
         };
 
-        for (id, mut h) in handles {
+        // 2. 置位停止标志，并**立即**把可见状态改为已停止（不等线程真正退出）
+        for (id, h) in &handles {
             h.stop.store(true, Ordering::SeqCst);
-            if let Some(j) = h.join.take() {
-                let _ = j.join();
-            }
-            if let Some(t) = self.find(id) {
+            if let Some(t) = self.find(*id) {
                 t.lock().unwrap().running = false;
             }
         }
 
+        // 3. 原有全局 running / started_at 逻辑（基于本函数移除后的 workers 表）
         let all_stopped = self.inner.workers.lock().unwrap().is_empty();
         if ids.is_none() || all_stopped {
             self.inner.running.store(false, Ordering::SeqCst);
         }
         if ids.is_none() {
             *self.inner.started_at.lock().unwrap() = None;
+        }
+
+        // 4. 交给后台「回收线程」去 join，命令不阻塞在这上面
+        if !handles.is_empty() {
+            std::thread::Builder::new()
+                .name("pingboard-reaper".to_string())
+                .spawn(move || {
+                    for (_, mut h) in handles {
+                        if let Some(j) = h.join.take() {
+                            let _ = j.join();
+                        }
+                    }
+                })
+                .ok();
         }
     }
 
@@ -429,8 +446,23 @@ fn spawn_worker(inner: Arc<Inner>, target: SharedTarget) {
     target.lock().unwrap().running = true;
 }
 
+/// 判断给定 stop 标志是否仍是该目标「当前注册」的 worker。
+///
+/// 用于收敛 `running` 的写入：只有当前注册的 worker 才有权改该目标的 `running`，
+/// 避免「旧 worker 覆盖新 worker 状态」——后台回收后旧 worker 可能还卡在 `probe()`
+/// 里等满 timeout，此期间同 id 已被重新 spawn，旧 worker 退出时不得再写 `running`。
+fn is_current_worker(inner: &Inner, id: u64, stop: &Arc<AtomicBool>) -> bool {
+    let map = inner.workers.lock().unwrap();
+    match map.get(&id) {
+        Some(h) => Arc::ptr_eq(&h.stop, stop),
+        // 已被 stop() 摘除，说明自己不是当前 worker（stop 已负责写 false）
+        None => false,
+    }
+}
+
 /// 工作线程主循环：解析 → 探测 → 更新统计 → 分片休眠
 fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
+    let id = { target.lock().unwrap().id };
     let mut v4_engine: Option<Engine> = None;
     let mut v6_engine: Option<fallback::PingEngine> = None;
 
@@ -471,6 +503,10 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
                     addr = Some(a);
                 }
                 Err(e) => {
+                    // 解析可能阻塞数秒，期间若收到停止信号则丢弃本次失败统计
+                    if stop.load(Ordering::SeqCst) {
+                        break;
+                    }
                     {
                         let mut g = target.lock().unwrap();
                         g.last_error = Some(e);
@@ -509,8 +545,17 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
                 .probe(&ip.to_string(), timeout_ms, payload_size, ttl)
         };
 
+        // 期间若收到停止信号，丢弃本次探测结果直接退出，
+        // 避免「停止后 sent 仍在增长」（后台回收期间旧线程仍可能写回统计）
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+
         // ---------- 更新统计 ----------
         let now = now_ms();
+        // 仅当自己仍是该 id 当前注册的 worker 时才写 running，
+        // 否则会与同 id 的新 worker 竞态（旧 worker 可能还卡在 probe 里等满 timeout）。
+        let still_current = is_current_worker(&inner, id, &stop);
         {
             let mut g = target.lock().unwrap();
             match outcome.status {
@@ -531,15 +576,22 @@ fn worker_loop(inner: Arc<Inner>, target: SharedTarget, stop: Arc<AtomicBool>) {
                     stats::apply_failure(&mut g, history_len, Status::Failed);
                 }
             }
-            g.running = true;
+            if still_current {
+                g.running = true;
+            }
         }
 
         // ---------- 休眠（分片检查停止标志） ----------
         sleep_interruptible(&stop, interval_ms);
     }
 
-    // 线程退出：标记该目标已停止
-    target.lock().unwrap().running = false;
+    // 线程退出：只在「自己仍是该目标当前注册的 worker」时才清 running。
+    // 否则会与同 id 的新 worker 竞态：旧 worker（可能还卡在 probe 里等满 timeout）
+    // 退出时会把新 worker 刚写上的 running=true 覆盖回 false，导致 UI 短暂显示「已停止」。
+    // （被 stop() 摘除的情况 map 查不到自己 → 不写，running=false 已由 stop() 负责。）
+    if is_current_worker(&inner, id, &stop) {
+        target.lock().unwrap().running = false;
+    }
 }
 
 /// 可被停止标志打断的休眠：每 100ms 检查一次
@@ -936,7 +988,8 @@ mod tests {
         assert_eq!(st.snapshot().active_threads, 4, "4 个目标应全部运行");
 
         st.stop(Some(vec![ids[0]]));
-        // stop 会 join 工作线程后才返回，故此刻取到的 sent 已稳定
+        // stop 现在「先置位、立即返回、后台回收」；(b) 的停止检查保证旧线程不再写回统计，
+        // 故此处取到的 sent 已稳定
         let after_stop = st.snapshot();
         let s0 = after_stop.targets.iter().find(|t| t.id == ids[0]).unwrap().sent;
         let others_before: Vec<u64> = ids[1..]
@@ -964,5 +1017,93 @@ mod tests {
         eprintln!("[qa] stop-one: active={} total_sent={}", after.active_threads, after.total_sent);
         st.stop(None);
         assert_eq!(st.snapshot().active_threads, 0);
+    }
+
+    /* ============== v1.1.2 追加：stop 性能（不再随目标数增长） ============== */
+
+    /// 100 个回环目标时 stop(None) 必须立即返回：
+    /// 修复前 ≈ Σ(各线程退出时间)，100 台接近 10 秒；修复后应 < 300ms。
+    #[test]
+    fn qa_v112_stop_returns_fast_with_many_targets() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(100, 256, true));
+        st.start(None).expect("启动 100 个回环目标应成功");
+        std::thread::sleep(Duration::from_millis(300));
+
+        let before = st.snapshot();
+        eprintln!("[qa-v112] stop 前：threads={} sent={}", before.active_threads, before.total_sent);
+
+        let t0 = std::time::Instant::now();
+        st.stop(None);
+        let elapsed = t0.elapsed();
+        eprintln!("[qa-v112] stop(None) 100 目标耗时：{} ms", elapsed.as_millis());
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "stop 应立即返回（< 300ms），实际 {} ms",
+            elapsed.as_millis()
+        );
+
+        // 可见状态应立即变为已停止
+        let snap = st.snapshot();
+        assert!(!snap.running, "stop(None) 后 running 应为 false");
+        assert_eq!(snap.active_threads, 0, "stop(None) 后 workers 表应已清空");
+        for t in &snap.targets {
+            assert!(!t.running, "目标 {} 应被标记为已停止", t.host);
+        }
+
+        // 再等 300ms，后台回收期间 sent 不应再增长（验证 (b) 丢弃迟到结果）
+        let sent_at_stop: u64 = snap.total_sent;
+        std::thread::sleep(Duration::from_millis(300));
+        let sent_later = st.snapshot().total_sent;
+        eprintln!("[qa-v112] stop 后 total_sent：{} → {}", sent_at_stop, sent_later);
+        assert_eq!(sent_later, sent_at_stop, "stop 后 sent 不应再增长");
+    }
+
+    /* ============== v1.1.3 追加：stop→立即 start 的旧 worker 竞态回归 ============== */
+
+    /// 回归：反复「stop → 立即 start」后，旧 worker 退出不得把同 id 新 worker 的
+    /// `running=true` 覆盖回 false（修复前旧 worker 在 probe/休眠结束后无条件写 false，
+    /// 会在约 1s 内造成「enabled 且 running=false」的假象 —— QA 用 100 目标复现过）。
+    ///
+    /// interval_ms=1000：新 worker 在 spawn 时即写 running=true 并每轮探测再写一次，
+    /// 旧 worker 则在被停后 ≤100ms（分片边界）退出并（旧代码）写 false，
+    /// 于是 start 后约 100ms~1000ms 窗口内可稳定采样到 running=false。
+    #[test]
+    fn qa_v113_restart_keeps_running_true_no_stale_worker_race() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg_limited(4, 256, true));
+        let ids: Vec<u64> = st.snapshot().targets.iter().map(|t| t.id).collect();
+        assert_eq!(ids.len(), 4);
+
+        for round in 0..8 {
+            st.start(None).unwrap();
+            std::thread::sleep(Duration::from_millis(50)); // 让 worker 进入 probe/休眠
+            // 停全部后立即重新启动全部：旧 worker 与新 worker 会短暂重叠
+            st.stop(None);
+            st.start(None).unwrap();
+
+            // 以 60ms 粒度采样，任一时刻都不应出现「enabled 且 running=false」
+            let mut worst = 0usize;
+            for _ in 0..12 {
+                std::thread::sleep(Duration::from_millis(60));
+                let snap = st.snapshot();
+                let bad = snap
+                    .targets
+                    .iter()
+                    .filter(|t| t.enabled && !t.running)
+                    .count();
+                if bad > worst {
+                    worst = bad;
+                }
+            }
+            eprintln!("[qa-v113] round {} 最坏「enabled 且 running=false」= {}", round, worst);
+            assert_eq!(
+                worst, 0,
+                "第 {} 轮：stop→立即 start 后不应出现「enabled 且 running=false」（旧 worker 覆盖新 worker 的竞态）",
+                round
+            );
+        }
+
+        st.stop(None);
     }
 }

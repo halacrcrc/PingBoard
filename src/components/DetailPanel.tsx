@@ -7,6 +7,8 @@ import LatencyChart from "./LatencyChart";
 export interface DetailPanelProps {
   target: TargetState | null;
   logs: LogEntry[];
+  /** 切换目标的监控（启用）状态：参与「开始全部」与开机自动启动 */
+  onToggleEnabled: (id: number, enabled: boolean) => void;
 }
 
 const Stat: React.FC<{ label: string; value: React.ReactNode; accent?: string }> = ({
@@ -20,7 +22,7 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; accent?: string }>
   </div>
 );
 
-const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs }) => {
+const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs, onToggleEnabled }) => {
   if (!target) {
     return (
       <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm">
@@ -31,14 +33,38 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs }) => {
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      {/* 标题 */}
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 shrink-0">
-        <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
-          {target.name || target.host}
+      {/* 标题 + 监控开关（开关放右侧，与表格里的普通复选框明显区分） */}
+      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 shrink-0 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+            {target.name || target.host}
+          </div>
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">
+            {target.host}
+            {target.resolved_ip ? ` → ${target.resolved_ip}` : ""}
+          </div>
         </div>
-        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">
-          {target.host}
-          {target.resolved_ip ? ` → ${target.resolved_ip}` : ""}
+        {/* 自绘 switch：绿色=已纳入监控，灰色=未监控 */}
+        <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            {target.enabled ? "已监控" : "监控"}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={target.enabled}
+            title="纳入监控：参与「开始全部」与开机自动启动"
+            onClick={() => onToggleEnabled(target.id, !target.enabled)}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 dark:focus:ring-offset-slate-900 ${
+              target.enabled ? "bg-emerald-500 dark:bg-emerald-600" : "bg-slate-300 dark:bg-slate-600"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                target.enabled ? "translate-x-4" : "translate-x-0.5"
+              }`}
+            />
+          </button>
         </div>
       </div>
 
@@ -67,8 +93,16 @@ const DetailPanel: React.FC<DetailPanelProps> = ({ target, logs }) => {
             <Stat label="丢包率" value={fmtPct(target.loss_pct)} accent={target.loss_pct > 0 ? "text-red-600 dark:text-red-400" : undefined} />
             <Stat label="连续失败" value={target.consecutive_fail} />
             <Stat label="最后成功" value={fmtTime(target.last_success_ts)} />
-            <Stat label="启用" value={target.enabled ? "是" : "否"} />
-            <Stat label="线程" value={target.running ? "运行中" : "已停止"} />
+            {/* 与工具栏/状态栏统一：运行中绿色、已停止灰色 */}
+            <Stat
+              label="线程"
+              value={target.running ? "运行中" : "已停止"}
+              accent={
+                target.running
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : "text-slate-400 dark:text-slate-500"
+              }
+            />
             {target.last_error && (
               <div className="col-span-2 pt-1 text-red-600 dark:text-red-400 break-all">
                 错误：{target.last_error}
