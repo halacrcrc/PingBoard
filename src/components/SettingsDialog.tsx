@@ -276,8 +276,8 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-[900px] min-w-0 max-h-[calc(100vh_-_2rem)] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
         {/* 顶部区：✕ 独立于标题卡片「之上、右对齐」；右内边距 pr-6 与滚动区补位对齐 */}
-        <div className="shrink-0 pl-3 pr-6 pt-1.5">
-          <div className="flex items-center justify-end mb-1 pr-4">
+        <div className="shrink-0 pl-3 pr-6 pt-0.5">
+          <div className="flex items-center justify-end mb-2">
             <button
               type="button"
               aria-label="关闭"
