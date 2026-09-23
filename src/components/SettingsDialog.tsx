@@ -27,6 +27,10 @@ const HARD_MAX_THREADS = 4096;
 /** 最大线程数取值范围（与后端 stats::normalize_settings 一致） */
 const MAX_THREADS_MIN = 1;
 const MAX_THREADS_MAX = 1024;
+/** 默认事件文件名（与 Rust 侧 events::EVENTS_FILE_NAME 一致），默认目录 = app_config_dir */
+const EVENTS_FILE_NAME = "pingboard-events.jsonl";
+/** 显式固定滚动条宽度（px）：与标题/底部区的右内边距补位一一对应，杜绝“猜滚动条宽度” */
+const SCROLLBAR_W = 12;
 
 /** 探测参数（卡片内三列网格）
  *  hint 统一右对齐挂在标签行上，因此必须短（≤ 8 字），长解释放到 note。 */
@@ -67,6 +71,30 @@ const labelHint = "text-[11px] text-slate-400 dark:text-slate-500 whitespace-now
 /** 控件下方的补充说明（仅长解释使用），统一挂在控件下方、左边缘与控件对齐 */
 const noteCls = "mt-1.5 text-[11px] leading-snug text-slate-400 dark:text-slate-500";
 
+/**
+ * 滚动区：显式固定 12px 滚动条宽度 + 常驻槽位（scrollbar-gutter: stable）。
+ * 标题区/底部区以 `pr-6`(= pl-3 的 12px + 固定的 12px 滚动条) 补位，
+ * 使三处卡片的右边缘严格对齐（不依赖浏览器默认滚动条宽度）。
+ */
+const scrollAreaCls =
+  "flex-1 overflow-y-auto overflow-x-hidden pl-3 pr-3 py-3 [scrollbar-gutter:stable] " +
+  "[&::-webkit-scrollbar]:w-3 [&::-webkit-scrollbar-thumb]:rounded-full " +
+  "[&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-600";
+
+/* ------------------------------- 纯函数 ------------------------------- */
+
+/**
+ * 由配置文件绝对路径推出「同目录下默认事件文件」的绝对路径。
+ * 默认事件目录 = app_config_dir（与配置文件同目录），默认文件 = pingboard-events.jsonl。
+ * configPath 为空时返回空串，由调用方给出兜底文案。
+ */
+export function defaultEventsFile(configPath: string): string {
+  if (!configPath) return "";
+  const i = Math.max(configPath.lastIndexOf("\\"), configPath.lastIndexOf("/"));
+  if (i < 0) return EVENTS_FILE_NAME;
+  return configPath.slice(0, i) + configPath[i] + EVENTS_FILE_NAME;
+}
+
 /* ------------------------------- 小组件 ------------------------------- */
 
 /** 分组卡片容器：左侧一道强调条 + 标题 + 可选副说明；span=2 时横跨双列 */
@@ -77,10 +105,10 @@ const Card: React.FC<{ title: string; sub?: string; span?: 1 | 2; children: Reac
   children,
 }) => (
   <section
-    className={`${card} px-4 py-3`}
+    className={`${card} px-4 py-2.5`}
     style={span === 2 ? { gridColumn: "span 2 / span 2" } : undefined}
   >
-    <div className="flex items-center gap-2 mb-3">
+    <div className="flex items-center gap-2 mb-2">
       <span className="w-[3px] h-3.5 rounded-full bg-sky-500 shrink-0" />
       <h3 className="text-[13px] font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
         {title}
@@ -113,6 +141,23 @@ const Field: React.FC<{
     )}
     {children}
     {note && <div className={noteCls}>{note}</div>}
+  </div>
+);
+
+/** 成组块：标签在上（左对齐、可带状态小标） / 控件在下。用于「事件日志」卡片，保证每行左边缘一致 */
+const Block: React.FC<{ label: string; tag?: React.ReactNode; children: React.ReactNode }> = ({
+  label,
+  tag,
+  children,
+}) => (
+  <div className="min-w-0">
+    <div className="flex items-center gap-1.5 mb-1.5 min-w-0">
+      <span className={labelCls} title={label}>
+        {label}
+      </span>
+      {tag}
+    </div>
+    {children}
   </div>
 );
 
@@ -185,6 +230,13 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
     }
   };
 
+  /** 默认事件文件绝对路径（由配置文件路径推出；读不到时回落空串） */
+  const defaultEventsPath = defaultEventsFile(configPath);
+  const dirIsDefault = draft.events_dir === null || draft.events_dir === "";
+  const dirValue = dirIsDefault ? defaultEventsPath : (draft.events_dir as string);
+  /** 具体路径 / 兜底文案（绝不显示空白或半截路径） */
+  const dirDisplay = dirValue || "（正在读取默认目录…）";
+
   const save = async () => {
     // 前端校验（后端也会再校验一次）
     const checks: [keyof PingSettings, number, number, string][] = [
@@ -222,28 +274,27 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-[900px] min-w-0 max-h-[86vh] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
-        {/* 标题区（同样是一张卡片）：标题 + 副标题 + 配置文件路径 */}
-        <div className="shrink-0 px-3 pt-3">
+      <div className="w-[900px] min-w-0 max-h-[calc(100vh_-_2rem)] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
+        {/* 顶部区：✕ 独立于标题卡片「之上、右对齐」；右内边距 pr-6 与滚动区补位对齐 */}
+        <div className="shrink-0 pl-3 pr-6 pt-1.5">
+          <div className="flex items-center justify-end mb-1 pr-4">
+            <button
+              type="button"
+              aria-label="关闭"
+              title="关闭"
+              className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-slate-400 transition-colors hover:text-slate-700 hover:bg-slate-200 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+              onClick={onClose}
+            >
+              ✕
+            </button>
+          </div>
+          {/* 标题卡片（仍为整宽）：标题 + 副标题 + 配置文件路径 */}
           <div className={`${card} px-4 py-2.5`}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold leading-6 text-slate-800 dark:text-slate-100">
-                  设置
-                </div>
-                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  探测参数、并发上限与事件日志；保存后立即生效
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="关闭"
-                title="关闭"
-                className="-mr-1 -mt-0.5 w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-slate-400 transition-colors hover:text-slate-700 hover:bg-slate-100 dark:hover:text-slate-200 dark:hover:bg-slate-800"
-                onClick={onClose}
-              >
-                ✕
-              </button>
+            <div className="text-[15px] font-semibold leading-6 text-slate-800 dark:text-slate-100">
+              设置
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              探测参数、并发上限与事件日志；保存后立即生效
             </div>
             <div className="mt-1 flex items-baseline gap-1.5 min-w-0 text-[11px]">
               <span className="text-slate-400 dark:text-slate-500 shrink-0">配置文件</span>
@@ -258,10 +309,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
         </div>
 
         {/* 卡片流（唯一滚动区）：双列卡片，宽卡片横跨两列 */}
-        <div className="flex-1 overflow-auto px-3 py-3">
-          <div className="grid grid-cols-2 gap-3 items-start">
+        <div className={scrollAreaCls}>
+          <div className="grid grid-cols-2 gap-2.5 items-start">
             <Card title="探测" span={2}>
-              <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+              <div className="grid grid-cols-3 gap-x-4 gap-y-2.5">
                 {PROBE_FIELDS.map((f) => (
                   <Field key={String(f.key)} label={f.label} hint={f.hint}>
                     <input
@@ -307,8 +358,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                 </Field>
                 <Field
                   label="最大线程数"
-                  hint={`${MAX_THREADS_MIN}..${MAX_THREADS_MAX}`}
-                  note={draft.limit_max_threads ? undefined : "未启用上限，此处仅记录"}
+                  hint={draft.limit_max_threads ? `${MAX_THREADS_MIN}..${MAX_THREADS_MAX}` : "未启用上限，仅记录"}
                 >
                   <input
                     type="number"
@@ -321,30 +371,34 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                     onChange={(e) => setNum("max_threads", e.target.value)}
                   />
                 </Field>
-                <Field span={2}>
-                  <p className="text-[11px] leading-snug text-slate-400 dark:text-slate-500">
-                    每台主机占用 1 个系统线程 + 1 个 ICMP 句柄。500 台以上线程调度与内存开销会明显上升，
-                    建议保持上限开启并分批启动；关闭后仅保留 {HARD_MAX_THREADS} 硬保护。
-                  </p>
-                </Field>
               </div>
             </Card>
 
+            {/* 并发说明（整宽）：从「并发」卡片移出，使两卡内容等高、下边缘对齐 */}
+            <p
+              className="px-1 text-[11px] leading-snug text-slate-400 dark:text-slate-500"
+              style={{ gridColumn: "span 2 / span 2" }}
+            >
+              并发：每台主机占用 1 个系统线程 + 1 个 ICMP 句柄。500 台以上线程调度与内存开销会明显上升，
+              建议保持上限开启并分批启动；关闭后仅保留 {HARD_MAX_THREADS} 硬保护。
+            </p>
+
             <Card title="事件日志" sub="记录每台主机的故障与恢复" span={2}>
-              <div className="grid grid-cols-3 gap-x-4 gap-y-3">
-                <Field label="启用事件日志" hint="总开关">
+              {/* 成组块 2×2：标签在上 / 控件在下，每行左边缘一致，无右对齐空洞 */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                <Block label="启用事件日志">
                   <Toggle
                     checked={draft.events_on}
                     onChange={(v) => setDraft((d) => ({ ...d, events_on: v }))}
                   />
-                </Field>
-                <Field label="保存事件到文件" hint="写入 jsonl">
+                </Block>
+                <Block label="保存事件到文件">
                   <Toggle
                     checked={draft.events_persist}
                     onChange={(v) => setDraft((d) => ({ ...d, events_persist: v }))}
                   />
-                </Field>
-                <Field label="每主机保留条数" hint="超出丢弃最旧">
+                </Block>
+                <Block label="每主机保留条数">
                   <div className="flex items-center gap-4 h-8">
                     {KEEP_OPTIONS.map((k) => (
                       <label key={k} className="flex items-center gap-1.5 cursor-pointer">
@@ -355,18 +409,15 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                           checked={draft.events_keep === k}
                           onChange={() => setDraft((d) => ({ ...d, events_keep: k }))}
                         />
-                        <span className="text-[13px] text-slate-700 dark:text-slate-200">{k}</span>
+                        <span className="text-[13px] text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                          {k}
+                        </span>
                       </label>
                     ))}
                   </div>
-                </Field>
-
-                <Field
-                  span={3}
-                  label="事件等级"
-                  note="仅故障 = 故障 / 无法连通 / 解析失败 / 恢复；标准另含首次连通 / 开始 / 停止；详细另含配置变更。"
-                >
-                  <div className="flex items-center gap-6 h-8">
+                </Block>
+                <Block label="事件等级">
+                  <div className="flex items-center gap-5 h-8">
                     {LEVEL_OPTIONS.map((o) => (
                       <label key={o.value} className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -382,19 +433,33 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                       </label>
                     ))}
                   </div>
-                </Field>
+                </Block>
+              </div>
 
-                <Field
-                  span={3}
+              {/* 事件等级含义（整宽说明行） */}
+              <p className={`${noteCls} mt-3`}>
+                事件等级：仅故障 = 故障 / 无法连通 / 解析失败 / 恢复；标准另含首次连通 / 开始 / 停止；
+                详细另含配置变更。
+              </p>
+
+              {/* 事件保存目录（整宽）：具体默认绝对路径 + 选择 / 恢复默认 */}
+              <div className="mt-3.5">
+                <Block
                   label="事件保存目录"
-                  note="默认存在配置目录下（pingboard-events.jsonl）；历史文件在应用启动时读回，每主机只取最近「保留条数」条。"
+                  tag={
+                    dirIsDefault ? (
+                      <span className="text-[10px] leading-none px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0">
+                        默认
+                      </span>
+                    ) : undefined
+                  }
                 >
                   <div className="flex items-center gap-2">
                     <div
-                      className={`${inputCls} flex-1 min-w-0 flex items-center cursor-default`}
-                      title={draft.events_dir ?? "（默认：配置目录）"}
+                      className={`${inputCls} flex-1 min-w-0 flex items-center cursor-default select-all`}
+                      title={dirDisplay}
                     >
-                      <span className="truncate">{draft.events_dir ?? "（默认：配置目录）"}</span>
+                      <span className="truncate">{dirDisplay}</span>
                     </div>
                     <button type="button" className={smallBtn} onClick={chooseDir}>
                       选择…
@@ -403,19 +468,22 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                       type="button"
                       className={smallBtn}
                       onClick={() => setDraft((d) => ({ ...d, events_dir: null }))}
-                      disabled={draft.events_dir === null}
+                      disabled={dirIsDefault}
                     >
                       恢复默认
                     </button>
                   </div>
-                </Field>
+                  <div className={noteCls}>
+                    历史文件在应用启动时读回，每主机只取最近「保留条数」条。
+                  </div>
+                </Block>
               </div>
             </Card>
           </div>
         </div>
 
-        {/* 底部操作栏（卡片）：左侧承载错误提示，右侧两个按钮 */}
-        <div className="shrink-0 px-3 pb-3">
+        {/* 底部操作栏（卡片）：左侧承载错误提示，右侧两个按钮；pr-6 与滚动区补位对齐 */}
+        <div className="shrink-0 pl-3 pr-6 pb-3">
           <div className={`${card} px-4 py-2.5 flex items-center justify-between gap-3`}>
             <div
               className="min-w-0 text-[12px] text-red-600 dark:text-red-400 truncate"

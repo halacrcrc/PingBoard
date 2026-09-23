@@ -33,6 +33,9 @@ const stubPlugin = {
       let contents;
       if (args.path === "api") {
         contents = "export const addTargets = async () => [];\nexport const startPinging = async () => {};\n";
+      } else if (args.path === "tauri") {
+        // @tauri-apps/* 桩：SettingsDialog 需要 plugin-dialog 的具名导出 open
+        contents = "export const open = async () => null;\nexport default {};\n";
       } else if (args.path === "jsx-runtime" || args.path === "jsx-dev-runtime") {
         contents =
           "export const jsx = () => null;\nexport const jsxs = () => null;\nexport const jsxDEV = () => null;\nexport const Fragment = {};\nexport default {};\n";
@@ -89,6 +92,7 @@ function isNull(actual, msg) {
 /* ============================ 开始测试 ============================ */
 const dlg = await loadPure("src/components/AddTargetsDialog.tsx");
 const fmt = await loadPure("src/lib/format.ts");
+const settings = await loadPure("src/components/SettingsDialog.tsx");
 
 const { expandIpRange, parseBatch } = dlg;
 
@@ -281,6 +285,72 @@ check("R2 修复复验：末段形式上限 255 不被截断", () => {
 
 check("R2 修复复验：parseBatch 超大区间仍截断到 1024", () => {
   eq(parseBatch("10.0.0.1-10.255.255.254").length, 1024);
+});
+
+/* ============ Round 3 固化：defaultEventsFile（设置对话框默认事件文件路径） ============ */
+// 依据：默认事件目录 = app_config_dir（与配置文件同目录），默认文件名 = pingboard-events.jsonl。
+// 该纯函数从配置文件绝对路径推导默认事件文件路径，供「事件保存目录」在默认态显示具体绝对路径。
+const { defaultEventsFile } = settings;
+const EVENTS_FILE_NAME = "pingboard-events.jsonl";
+
+check("defaultEventsFile 标准 Windows 绝对路径 → 同目录 + pingboard-events.jsonl", () => {
+  eq(
+    defaultEventsFile("C:\\Users\\x\\AppData\\Roaming\\com.pingboard.desktop\\pingboard-config.json"),
+    "C:\\Users\\x\\AppData\\Roaming\\com.pingboard.desktop\\pingboard-events.jsonl"
+  );
+});
+
+check("defaultEventsFile 正斜杠路径 → 保持正斜杠分隔符", () => {
+  eq(defaultEventsFile("C:/a/b/pingboard-config.json"), "C:/a/b/pingboard-events.jsonl");
+});
+
+check("defaultEventsFile 无分隔符（仅文件名）→ 直接回落默认文件名", () => {
+  eq(defaultEventsFile("pingboard-config.json"), "pingboard-events.jsonl");
+});
+
+check("defaultEventsFile 空串 → 空串（由调用方兜底文案）", () => {
+  eq(defaultEventsFile(""), "");
+});
+
+check("defaultEventsFile 尾部带分隔符 → 结果不得出现双反斜杠", () => {
+  const r = defaultEventsFile("C:\\dir\\");
+  eq(r, "C:\\dir\\pingboard-events.jsonl");
+  if (r.includes("\\\\")) throw new Error(`尾部分隔符场景不应产生双反斜杠，实际：${r}`);
+});
+
+check("defaultEventsFile UNC 路径 → 保留 UNC 前缀并同目录", () => {
+  eq(
+    defaultEventsFile("\\\\server\\share\\pingboard-config.json"),
+    "\\\\server\\share\\pingboard-events.jsonl"
+  );
+});
+
+check("defaultEventsFile 含中文/空格的目录名 → 目录原样保留", () => {
+  eq(
+    defaultEventsFile("C:\\用户\\我的 目录\\pingboard-config.json"),
+    "C:\\用户\\我的 目录\\pingboard-events.jsonl"
+  );
+});
+
+check("defaultEventsFile 属性式：目录部分与输入完全一致，文件名恒为 pingboard-events.jsonl", () => {
+  const cases = [
+    "C:\\Users\\x\\AppData\\Roaming\\com.pingboard.desktop\\pingboard-config.json",
+    "C:/a/b/pingboard-config.json",
+    "D:\\deep dir\\my folder\\pingboard-config.json",
+    "\\\\server\\share\\pingboard-config.json",
+    "C:\\用户\\我的 目录\\pingboard-config.json",
+  ];
+  for (const p of cases) {
+    const out = defaultEventsFile(p);
+    const i = Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/"));
+    const sep = p[i];
+    // ① 目录部分与输入完全一致
+    eq(out.slice(0, i), p.slice(0, i), `目录部分应与输入一致：${p}`);
+    // ② 分隔符与输入一致
+    eq(out[i], sep, `分隔符应与输入一致：${p}`);
+    // ③ 文件名恒为 pingboard-events.jsonl
+    eq(out.slice(i + 1), EVENTS_FILE_NAME, `文件名应为 ${EVENTS_FILE_NAME}：${p}`);
+  }
 });
 
 /* ------------------------------ 结果汇总 ------------------------------ */
