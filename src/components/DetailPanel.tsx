@@ -30,7 +30,7 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; accent?: string }>
   accent,
 }) => (
   <div className="flex items-center justify-between py-0.5">
-    <span className="text-slate-400 dark:text-slate-500">{label}</span>
+    <span className="text-slate-500 dark:text-slate-400">{label}</span>
     <span className={`font-mono ${accent ?? "text-slate-700 dark:text-slate-200"}`}>{value}</span>
   </div>
 );
@@ -64,7 +64,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 }) => {
   if (!target) {
     return (
-      <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm">
+      <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm">
         选择左侧任意主机查看详情
       </div>
     );
@@ -139,7 +139,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               accent={
                 target.running
                   ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-slate-400 dark:text-slate-500"
+                  : "text-slate-500 dark:text-slate-400"
               }
             />
             {target.last_error && (
@@ -161,7 +161,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               </span>
               {hasHistory && (
                 <span
-                  className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0"
+                  className="text-[10px] text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0"
                   title="包含上一次运行记录的事件，其时间显示为「月-日 时:分:秒」"
                 >
                   含历史
@@ -200,7 +200,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
           <div className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 max-h-48 overflow-auto">
             {logs.length === 0 ? (
-              <div className="px-2 py-3 text-center text-slate-400 text-[11px] whitespace-nowrap">
+              <div className="px-2 py-3 text-center text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
                 {recording ? "暂无事件" : "已关闭事件记录"}
               </div>
             ) : (
@@ -210,7 +210,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                   return (
                     <li key={`${l.session}-${l.seq}`} className="px-2 py-1 flex gap-2">
                       <span
-                        className="text-slate-400 shrink-0"
+                        className="text-slate-500 dark:text-slate-400 shrink-0"
                         title={
                           current
                             ? undefined

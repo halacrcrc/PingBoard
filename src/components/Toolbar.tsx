@@ -116,7 +116,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         {/* 状态文字与左侧指示灯配色一致：运行中绿色、已停止灰色（绿=正常/活动） */}
         <span
           className={`text-xs whitespace-nowrap ${
-            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"
+            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
           }`}
         >
           {running ? (
@@ -175,11 +175,11 @@ const Toolbar: React.FC<ToolbarProps> = ({
             className="fixed z-20 w-52 rounded border shadow-lg bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 py-1"
             style={{ top: exportPos.top, left: exportPos.left }}
           >
-            <div className="px-3 py-1 text-[11px] text-slate-400 dark:text-slate-500">导出全部</div>
+            <div className="px-3 py-1 text-[11px] text-slate-500 dark:text-slate-400">导出全部</div>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700" onClick={() => handleExport("csv", false)}>CSV（Excel 兼容）</button>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700" onClick={() => handleExport("txt", false)}>纯文本 TXT</button>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700" onClick={() => handleExport("html", false)}>HTML 报表</button>
-            <div className="px-3 py-1 mt-1 text-[11px] text-slate-400 dark:text-slate-500 border-t border-slate-200 dark:border-slate-600 pt-1">
+            <div className="px-3 py-1 mt-1 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-600 pt-1">
               仅导出选中（{selectionCount} 台）
             </div>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40" disabled={selectionCount === 0} onClick={() => handleExport("csv", true)}>选中 → CSV</button>
@@ -232,7 +232,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder="搜索备注名 / 主机 / IP"
-          className="h-7 w-full pl-7 pr-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
+          className="h-7 w-full pl-7 pr-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
         <span className="absolute left-2 top-1 text-slate-400 text-xs">🔍</span>
       </div>

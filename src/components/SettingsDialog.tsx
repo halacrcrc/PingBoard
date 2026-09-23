@@ -67,9 +67,9 @@ const radioCls = "accent-sky-600 w-4 h-4 shrink-0";
 /** 字段标签行（标签左、取值范围右对齐） */
 const labelRow = "flex items-baseline justify-between gap-2 mb-1.5 min-w-0";
 const labelCls = "text-[12px] text-slate-600 dark:text-slate-300 whitespace-nowrap";
-const labelHint = "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0";
+const labelHint = "text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap shrink-0";
 /** 控件下方的补充说明（仅长解释使用），统一挂在控件下方、左边缘与控件对齐 */
-const noteCls = "mt-1.5 text-[11px] leading-snug text-slate-400 dark:text-slate-500";
+const noteCls = "mt-1.5 text-[11px] leading-snug text-slate-500 dark:text-slate-400";
 
 /**
  * 滚动区：显式固定 12px 滚动条宽度 + 常驻槽位（scrollbar-gutter: stable）。
@@ -115,7 +115,7 @@ const Card: React.FC<{ title: string; sub?: string; span?: 1 | 2; children: Reac
         {title}
       </h3>
       {sub && (
-        <span className="text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0">{sub}</span>
+        <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate min-w-0">{sub}</span>
       )}
     </div>
     {children}
@@ -309,7 +309,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
               探测参数、并发上限与事件日志；保存后立即生效
             </div>
             <div className="mt-1 flex items-baseline gap-1.5 min-w-0 text-[11px]">
-              <span className="text-slate-400 dark:text-slate-500 shrink-0">配置文件</span>
+              <span className="text-slate-500 dark:text-slate-400 shrink-0">配置文件</span>
               <span
                 className="font-mono text-slate-500 dark:text-slate-400 truncate"
                 title={configPath || "（读取中…）"}
@@ -388,7 +388,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
 
             {/* 并发说明（整宽）：从「并发」卡片移出，使两卡内容等高、下边缘对齐 */}
             <p
-              className="px-1 text-[11px] leading-snug text-slate-400 dark:text-slate-500"
+              className="px-1 text-[11px] leading-snug text-slate-600 dark:text-slate-400"
               style={{ gridColumn: "span 2 / span 2" }}
             >
               并发：每台主机占用 1 个系统线程 + 1 个 ICMP 句柄。500 台以上线程调度与内存开销会明显上升，
@@ -460,7 +460,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                   label="事件保存目录"
                   tag={
                     dirIsDefault ? (
-                      <span className="text-[10px] leading-none px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 whitespace-nowrap shrink-0">
+                      <span className="text-[10px] leading-none px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 whitespace-nowrap shrink-0">
                         默认
                       </span>
                     ) : undefined

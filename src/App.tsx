@@ -592,7 +592,7 @@ const App: React.FC = () => {
                   <div className="font-medium mb-1">示例主机</div>
                   {SAMPLE_TARGETS.map((s) => (
                     <div key={s.host} className="font-mono">
-                      {s.host} <span className="text-slate-400">· {s.name}</span>
+                      {s.host} <span className="text-slate-500 dark:text-slate-400">· {s.name}</span>
                     </div>
                   ))}
                 </div>

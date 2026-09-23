@@ -276,7 +276,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
 
   const tabClass = (active: boolean) =>
     `px-3 h-7 rounded-t border-b-2 ${
-      active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500"
+      active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500 dark:text-slate-400"
     }`;
 
   // 目标预览块（批量与文件页共用样式）；dups 为与列表已有目标重复的 host 列表
@@ -284,7 +284,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     <>
       <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
         解析到 <span className="font-mono text-sky-600 dark:text-sky-400">{list.length}</span> 个目标
-        <span className="text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
+        <span className="text-slate-500 dark:text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
       </div>
       {dups.length > 0 && (
         <div className="mt-1 text-[12px] text-amber-600 dark:text-amber-400">
@@ -297,10 +297,10 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
           {list.slice(0, 200).map((p, i) => (
             <div key={i} className="truncate">
               {p.host}
-              <span className="text-slate-400"> · {p.name}</span>
+              <span className="text-slate-500 dark:text-slate-400"> · {p.name}</span>
             </div>
           ))}
-          {list.length > 200 && <div className="text-slate-400">… 其余 {list.length - 200} 个</div>}
+          {list.length > 200 && <div className="text-slate-500 dark:text-slate-400">… 其余 {list.length - 200} 个</div>}
         </div>
       )}
     </>
@@ -379,7 +379,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
                   选择文件…
                 </button>
                 <div className="flex-1 min-w-0 truncate font-mono text-[12px] text-slate-600 dark:text-slate-300" title={filePath}>
-                  {filePath || <span className="text-slate-400">支持 .txt / .csv / .xlsx / .xls / .xlsm / .ods</span>}
+                  {filePath || <span className="text-slate-500 dark:text-slate-400">支持 .txt / .csv / .xlsx / .xls / .xlsm / .ods</span>}
                 </div>
               </div>
 
@@ -404,7 +404,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
               onChange={(e) => setStartNow(e.target.checked)}
             />
             添加后立即开始 Ping
-            {running && <span className="text-[11px] text-slate-400">（当前已在运行，新目标会自动启动）</span>}
+            {running && <span className="text-[11px] text-slate-500 dark:text-slate-400">（当前已在运行，新目标会自动启动）</span>}
           </label>
 
           {error && <div className="mt-2 text-red-600 dark:text-red-400">{error}</div>}

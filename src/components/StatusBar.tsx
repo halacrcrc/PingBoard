@@ -13,7 +13,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ snapshot }) => {
   const uptime = running && started_at ? now - started_at : 0;
 
   const item = "flex items-center gap-1 whitespace-nowrap";
-  const label = "text-slate-400 dark:text-slate-500";
+  const label = "text-slate-500 dark:text-slate-400";
 
   return (
     <div className="flex items-center gap-4 px-3 h-7 shrink-0 border-t bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300 overflow-x-auto">
@@ -22,7 +22,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ snapshot }) => {
         {/* 状态文字与指示灯同色系：运行中绿色、已停止灰色 */}
         <span
           className={
-            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-400 dark:text-slate-500"
+            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
           }
         >
           {running ? "运行中" : "已停止"}

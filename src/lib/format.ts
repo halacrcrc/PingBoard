@@ -43,7 +43,7 @@ export function fmtDuration(ms: number | null | undefined): string {
 
 /** 延迟分档颜色：<50 绿 / <150 黄 / >=150 橙 */
 export function rttColorClass(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "text-slate-400 dark:text-slate-500";
+  if (v === null || v === undefined) return "text-slate-500 dark:text-slate-400";
   if (v < 50) return "text-emerald-600 dark:text-emerald-400";
   if (v < 150) return "text-yellow-600 dark:text-yellow-400";
   return "text-orange-600 dark:text-orange-400";
