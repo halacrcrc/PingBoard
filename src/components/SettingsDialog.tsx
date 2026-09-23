@@ -73,8 +73,9 @@ const noteCls = "mt-1.5 text-[11px] leading-snug text-slate-400 dark:text-slate-
 
 /**
  * 滚动区：显式固定 12px 滚动条宽度 + 常驻槽位（scrollbar-gutter: stable）。
- * 标题区/底部区以 `pr-6`(= pl-3 的 12px + 固定的 12px 滚动条) 补位，
+ * 标题卡与底部区以 `pr-6`/`mr-6`(= pl-3 的 12px + 固定的 12px 滚动条) 补位，
  * 使三处卡片的右边缘严格对齐（不依赖浏览器默认滚动条宽度）。
+ * 顶部区的 ✕ **不参与补位** —— 它贴弹窗右上角，与卡片右缘不对齐是有意为之。
  */
 const scrollAreaCls =
   "flex-1 overflow-y-auto overflow-x-hidden pl-3 pr-3 py-3 [scrollbar-gutter:stable] " +
@@ -275,21 +276,32 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-[900px] min-w-0 max-h-[calc(100vh_-_2rem)] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
-        {/* 顶部区：✕ 独立于标题卡片「之上、右对齐」；右内边距 pr-6 与滚动区补位对齐 */}
-        <div className="shrink-0 pl-3 pr-6 pt-0.5">
-          <div className="flex items-center justify-end mb-2">
+        {/* 顶部区：✕ 贴弹窗右上角（不受滚动条补位约束）；标题卡用 mr-6 保持与滚动区卡片右对齐 */}
+        <div className="shrink-0 pl-3 pt-0.5">
+          <div className="flex items-center justify-end mb-2 pr-1.5">
             <button
               type="button"
               aria-label="关闭"
               title="关闭"
-              className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-slate-400 transition-colors hover:text-slate-700 hover:bg-slate-200 dark:hover:text-slate-200 dark:hover:bg-slate-800"
+              className="w-7 h-7 shrink-0 rounded-md flex items-center justify-center text-slate-400 transition-colors hover:text-slate-700 hover:bg-slate-200 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800"
               onClick={onClose}
             >
-              ✕
+              {/* 自绘 ✕：线条粗细由 strokeWidth 精确控制（字体符号无法保证粗细一致） */}
+              <svg
+                viewBox="0 0 16 16"
+                className="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 4 12 12M12 4 4 12" />
+              </svg>
             </button>
           </div>
           {/* 标题卡片（仍为整宽）：标题 + 副标题 + 配置文件路径 */}
-          <div className={`${card} px-4 py-2.5`}>
+          <div className={`${card} px-4 py-2.5 mr-6`}>
             <div className="text-[15px] font-semibold leading-6 text-slate-800 dark:text-slate-100">
               设置
             </div>
