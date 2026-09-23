@@ -22,7 +22,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ snapshot }) => {
         {/* 状态文字与指示灯同色系：运行中绿色、已停止灰色 */}
         <span
           className={
-            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
+            running ? "text-emerald-700 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
           }
         >
           {running ? "运行中" : "已停止"}
@@ -43,11 +43,11 @@ const StatusBar: React.FC<StatusBarProps> = ({ snapshot }) => {
       </span>
       <span className={item}>
         <span className={label}>发包</span>
-        <span className="font-mono text-sky-600 dark:text-sky-400">{total_sent}</span>
+        <span className="font-mono text-sky-700 dark:text-sky-400">{total_sent}</span>
       </span>
       <span className={item}>
         <span className={label}>收包</span>
-        <span className="font-mono text-emerald-600 dark:text-emerald-400">{total_received}</span>
+        <span className="font-mono text-emerald-700 dark:text-emerald-400">{total_received}</span>
       </span>
       <span className={item}>
         <span className={label}>丢包</span>

@@ -276,14 +276,14 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
 
   const tabClass = (active: boolean) =>
     `px-3 h-7 rounded-t border-b-2 ${
-      active ? "border-sky-500 text-sky-600 dark:text-sky-400" : "border-transparent text-slate-500 dark:text-slate-400"
+      active ? "border-sky-500 text-sky-700 dark:text-sky-400" : "border-transparent text-slate-500 dark:text-slate-400"
     }`;
 
   // 目标预览块（批量与文件页共用样式）；dups 为与列表已有目标重复的 host 列表
   const preview = (list: TargetEntry[], dups: string[]) => (
     <>
       <div className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
-        解析到 <span className="font-mono text-sky-600 dark:text-sky-400">{list.length}</span> 个目标
+        解析到 <span className="font-mono text-sky-700 dark:text-sky-400">{list.length}</span> 个目标
         <span className="text-slate-500 dark:text-slate-400">（单次上限 {MAX_BATCH}，自动去重、跳过空行与 # 注释）</span>
       </div>
       {dups.length > 0 && (
@@ -389,7 +389,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
               </div>
 
               {fileBusy && (
-                <div className="mt-3 text-[12px] text-sky-600 dark:text-sky-400">正在读取并解析文件…</div>
+                <div className="mt-3 text-[12px] text-sky-700 dark:text-sky-400">正在读取并解析文件…</div>
               )}
 
               {!fileBusy && filePayload && preview(fileEntries, dupInfo.hosts)}

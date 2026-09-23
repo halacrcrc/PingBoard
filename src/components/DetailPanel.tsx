@@ -122,13 +122,19 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           <div className="rounded border border-slate-200 dark:border-slate-700 p-2 grid grid-cols-2 gap-x-4">
             <Stat label="状态" value={statusLabel(target.status)} />
             <Stat label="TTL" value={target.ttl ?? "-"} />
-            <Stat label="最近延迟" value={fmtMs(target.last_rtt_ms)} accent="text-emerald-600 dark:text-emerald-400" />
+            {/* 值有效才着绿：空值（-）不得显示成「正常」 */}
+            <Stat
+              label="最近延迟"
+              value={fmtMs(target.last_rtt_ms)}
+              accent={Number.isFinite(target.last_rtt_ms) ? "text-emerald-700 dark:text-emerald-400" : undefined}
+            />
             <Stat label="平均延迟" value={fmtMs(target.avg_rtt_ms)} />
             <Stat label="最小延迟" value={fmtMs(target.min_rtt_ms)} />
             <Stat label="最大延迟" value={fmtMs(target.max_rtt_ms)} />
             <Stat label="发送" value={target.sent} />
             <Stat label="接收" value={target.received} />
-            <Stat label="失败" value={target.failed} accent="text-red-600 dark:text-red-400" />
+            {/* 与「丢包率」同规则：0 次失败不着红，避免把正常状态画成故障 */}
+            <Stat label="失败" value={target.failed} accent={target.failed > 0 ? "text-red-600 dark:text-red-400" : undefined} />
             <Stat label="丢包率" value={fmtPct(target.loss_pct)} accent={target.loss_pct > 0 ? "text-red-600 dark:text-red-400" : undefined} />
             <Stat label="连续失败" value={target.consecutive_fail} />
             <Stat label="最后成功" value={fmtTime(target.last_success_ts)} />
@@ -138,7 +144,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
               value={target.running ? "运行中" : "已停止"}
               accent={
                 target.running
-                  ? "text-emerald-600 dark:text-emerald-400"
+                  ? "text-emerald-700 dark:text-emerald-400"
                   : "text-slate-500 dark:text-slate-400"
               }
             />

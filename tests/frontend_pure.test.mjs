@@ -227,6 +227,25 @@ check("rttColorClass 分档（<50 绿 / <150 黄 / >=150 橙）", () => {
   if (!fmt.rttColorClass(null).includes("slate")) throw new Error("null 应为灰色档");
 });
 
+check("rttColorClass 色阶固定（浅色 700 档 / 占位 slate-600，达 WCAG AA）", () => {
+  const cases = [
+    [49, "text-emerald-700"],
+    [50, "text-yellow-700"],
+    [149, "text-yellow-700"],
+    [150, "text-orange-700"],
+    [null, "text-slate-600"],
+    [undefined, "text-slate-600"],
+  ];
+  for (const [v, cls] of cases) {
+    const got = fmt.rttColorClass(v);
+    if (!got.startsWith(cls)) throw new Error(`${v} → 期望 ${cls}，实际 ${got}`);
+  }
+  // 占位色不得回退 slate-500：表格行底可能是失败行 red-50，其上 slate-500 仅 4.35:1
+  if (fmt.rttColorClass(null).includes("text-slate-500")) {
+    throw new Error("占位色不得用 slate-500（表格彩色行底上不达 AA）");
+  }
+});
+
 check("statusLabel 全覆盖且不含 unknown 分支遗漏", () => {
   eq(fmt.statusLabel("ok"), "正常");
   eq(fmt.statusLabel("timeout"), "超时");

@@ -38,24 +38,26 @@
 
 ## 安装
 
-提供三种安装包，**程序功能完全相同**，区别只在于「如何为缺失 WebView2 的目标机提供运行时」。
+提供两种安装包，**程序功能完全相同**，区别只在于「如何为缺失 WebView2 的目标机提供运行时」。
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.1.5_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.5_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.1.5_x64-setup-offline.exe`（**完整离线版**） | 217.9 MB（207.8 MiB） | **完全不需要联网** | 内网 / 无外网 / 批量部署 |
+| `PingBoard_1.1.6_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.6_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
 
-> v1.1.5 三种变体**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
+> v1.1.6 两种变体**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
 > 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
-> 三者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
+> 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
 > - 在线引导版 = `downloadBootstrapper`：安装时若检测到缺少 WebView2，才去下载约 1.8 MB 的引导程序；
-> - 内置引导版 = `embedBootstrapper`：把引导程序预置在安装包里，离线环境也能「发起」安装，但仍需联网下载运行时本体；
-> - 完整离线版 = `offlineInstaller`：内置 213 MB（203 MiB）的 WebView2 离线安装程序，**全程无需联网**。
+> - 内置引导版 = `embedBootstrapper`：把引导程序预置在安装包里，离线环境也能「发起」安装，但仍需联网下载运行时本体。
 >
-> 只要目标机已装 WebView2（Windows 11 默认如此），三种包装出来的结果**完全一致**，
+> 只要目标机已装 WebView2（Windows 11 默认如此），两种包装出来的结果**完全一致**，
 > 用最小的在线引导版即可。
+
+> **不再提供「完整离线版」**（`offlineInstaller`，≈ 218 MB）：本项目最低支持 Windows 10 +
+> WebView2 Evergreen，内置引导版已足以应对「目标机不能正常联网」的场景，218 MB 的体积与收益不成正比。
+> 旧设备用上面两个包即可；确需自建时方法见「构建」一节（保留备查，默认不构建）。
 
 ### 安装步骤
 
@@ -66,8 +68,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.1.5_x64-setup.exe /S                     :: 安装到默认目录
-PingBoard_1.1.5_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.1.6_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.6_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                     :: 静默卸载
 ```
 
@@ -257,19 +259,19 @@ npx tauri icon docs/app-icon.png
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.5_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.6_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
-`installMode = currentUser`（**免 UAC**），三种 `webviewInstallMode` 的取舍如下。
-
-切换 WebView2 打包方式（改 `src-tauri/tauri.conf.json` 的 `bundle.windows.webviewInstallMode` 后重新执行上面的命令）：
+`installMode = currentUser`（**免 UAC**）。本项目的**发布组合是前两种** `webviewInstallMode`：
 
 | `webviewInstallMode.type` | 产物体积 | 是否需要联网 | 说明 |
 |---|---|---|---|
-| `downloadBootstrapper`（默认） | ≈ 2.0 MB | 缺 WebView2 时需要 | 安装时才下载约 1.8 MB 引导程序 |
-| `embedBootstrapper` | ≈ 3.7 MB | 缺 WebView2 时需要 | 引导程序内置，安装包 +≈1.8 MB |
-| `offlineInstaller` | 217.9 MB | **不需要** | 内置 WebView2 离线安装程序（213 MB），**构建时需联网下载一次** |
+| `downloadBootstrapper`（默认，**构建并发布**） | ≈ 2.0 MB | 缺 WebView2 时需要 | 安装时才下载约 1.8 MB 引导程序 |
+| `embedBootstrapper`（**构建并发布**） | ≈ 3.7 MB | 缺 WebView2 时需要 | 引导程序内置，安装包 +≈1.8 MB |
+| `offlineInstaller`（**默认不构建**） | 217.9 MB | **不需要** | 内置 WebView2 离线安装程序（213 MB），**构建时需联网下载一次** |
+
+切换方式：改 `src-tauri/tauri.conf.json` 的 `bundle.windows.webviewInstallMode` 后重新执行上面的命令。
 
 ```jsonc
 // src-tauri/tauri.conf.json
@@ -280,12 +282,14 @@ npx tauri build --bundles nsis
       "installerIcon": "icons/icon.ico",
       "uninstallerIcon": "icons/icon.ico"
     },
-    "webviewInstallMode": { "type": "downloadBootstrapper" }  // 或 embedBootstrapper / offlineInstaller
+    "webviewInstallMode": { "type": "downloadBootstrapper" }  // 发布组合 = downloadBootstrapper + embedBootstrapper
   }
 }
 ```
 
-> `offlineInstaller` 首次构建会从微软下载
+> ⚠️ **三种变体产出的安装包文件名完全相同**，每构建完一个必须**立刻改名另存**，否则会被下一个覆盖。
+>
+> `offlineInstaller` 已不再发布（见「安装」一节的说明）。确需临时补一个时：首次构建会从微软下载
 > `MicrosoftEdgeWebView2RuntimeInstallerX64.exe`（约 203 MB），耗时较长；缓存后再次构建会更快。
 
 ---
@@ -349,6 +353,37 @@ pinginfo/
 ---
 
 ## 更新日志
+
+### v1.1.6 — 可读性：文字与数值配色全面达到 WCAG AA
+
+本版**不改功能与版式**，只调颜色；另有一项发布策略调整。
+
+- **改善：「次要文字」色阶整体提升一档。** 项目里原先并存两套灰阶 token
+  （`slate-400` + `dark:slate-500`，16 处；另一套 14 处），现统一收敛为后者。
+  实测：浅色说明文字 2.56:1 → **4.76:1**、「默认」小标 2.34:1 → **6.92:1**，
+  深色说明文字 3.75:1 → **6.96:1**，搜索框占位符同步提升。
+- **改善：彩色数值色阶提升一档。** 延迟分档的**三个彩色档原先全部低于 AA**
+  （绿 3.77 / 黄 2.94 / 橙 3.56，「黄色档」最差），现统一由 600 档改用 700 档：
+  绿 **5.48** / 黄 **4.92** / 橙 **5.18**，在任意行底色（白 / `slate-50` / `emerald-50` /
+  `red-50` / `sky-50`）上均 ≥ 4.5:1。同批：发送与接收计数、事件日志的「已恢复 / 首次连通」、
+  「运行中」状态文字同步加深。深色档本就达标（7.89~11.66），未动。
+- **改善：表格内文字色阶再提一档。** 主机列表的行底色会随状态变化（正常偏绿、失败偏红、
+  解析中偏蓝），比白底更暗，会让原本刚好达标的配色掉到线下 —— 例如次要文字 `slate-500`
+  在白底是 4.76:1，落在失败行底只剩 **4.35:1**。现把表格内的次要文字（占位 `-`、分隔符 `/`、
+  「最后成功时间」、延迟占位）与失败计数各提一档，在**任意行底色**上均 ≥ 4.5:1。
+- **改善：「未开始」状态徽标。** `bg-slate-400` → `bg-slate-500`（白字 2.56:1 → **4.76:1**）。
+- **修复：表头排序箭头对比度过低。** `sky-500` → `sky-700`（2.53:1 → **5.42:1**）。
+- **修复：搜索框的放大镜是个 emoji。** 原先用 `🔍` 字符，由彩色字形渲染，**CSS `color` 对它无效**
+  ——改色不会有任何效果。现改为自绘矢量图标，颜色才真正可控；并修掉原先该图标会遮挡
+  输入框左缘点击的问题（补 `pointer-events-none`）。
+- **修复：空值被着色。** 详情面板「最近延迟」在无数据（显示 `-`）时也显示绿色，
+  等同于把「无数据」画成「正常」，现只在值有效时才着色；「失败」计数同理，
+  0 次失败不再标红（与「丢包率」的既有规则统一）。
+- **发布策略：不再提供「完整离线版」**（≈ 218 MB）。本项目最低支持 Windows 10 + WebView2 Evergreen，
+  内置引导版已足以应对「目标机不能正常联网」的场景。今后只发布**在线引导版**与**内置引导版**两个包。
+
+> 验证方式：用 CDP 遍历界面上所有含文本的可见节点，按 WCAG 2.x 相对亮度逐节点计算对比度，
+> 浅色 / 深色两套主题各跑一遍，覆盖主界面、设置对话框与主机详情面板；本版范围内均 ≥ 4.5:1。
 
 ### v1.1.5 — 设置界面细节收尾
 

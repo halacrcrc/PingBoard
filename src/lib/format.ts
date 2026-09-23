@@ -41,12 +41,17 @@ export function fmtDuration(ms: number | null | undefined): string {
   return `${s}s`;
 }
 
-/** 延迟分档颜色：<50 绿 / <150 黄 / >=150 橙 */
+/** 延迟分档颜色：<50 绿 / <150 黄 / >=150 橙
+ *  浅色用 700 档：600 档四色全部低于 WCAG AA 4.5:1（绿 3.77 / 黄 2.94 / 橙 3.56，
+ *  黄档最差），而 700 档在任意行底（白 / slate-50 / emerald-50 / red-50 / sky-50）均 ≥ 4.5:1。
+ *  ⚠️ 四档必须同档位调整，只动一档会让色阶亮度失衡。深色 400 档已达标（7.89~11.66），不动。
+ *  无数据（null）用 slate-600 而非 slate-500：本函数只服务于表格内，
+ *  而表格行底会随状态变成彩色 -50 档（失败行 red-50 上 slate-500 仅 4.35:1）。 */
 export function rttColorClass(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "text-slate-500 dark:text-slate-400";
-  if (v < 50) return "text-emerald-600 dark:text-emerald-400";
-  if (v < 150) return "text-yellow-600 dark:text-yellow-400";
-  return "text-orange-600 dark:text-orange-400";
+  if (v === null || v === undefined) return "text-slate-600 dark:text-slate-400";
+  if (v < 50) return "text-emerald-700 dark:text-emerald-400";
+  if (v < 150) return "text-yellow-700 dark:text-yellow-400";
+  return "text-orange-700 dark:text-orange-400";
 }
 
 /** 状态中文标签 */
@@ -109,7 +114,7 @@ export function eventColorClass(kind: EventKind): string {
       return "text-red-600 dark:text-red-400";
     case "recover":
     case "first_ok":
-      return "text-emerald-600 dark:text-emerald-400";
+      return "text-emerald-700 dark:text-emerald-400";
     default:
       return "text-slate-600 dark:text-slate-300";
   }

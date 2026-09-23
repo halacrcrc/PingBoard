@@ -1,6 +1,6 @@
 [package]
 name = "pingboard"
-version = "1.1.5"
+version = "1.1.6"
 description = "PingBoard — 多主机 Ping 监视器"
 authors = ["PingBoard"]
 edition = "2021"

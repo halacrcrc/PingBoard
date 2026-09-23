@@ -196,7 +196,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
                 <td className="px-2 py-1 font-medium" title={t.name}>
                   <div className="flex items-center gap-2 min-w-0 max-w-[220px]">
                     <span className="truncate min-w-0">
-                      {t.name || <span className="text-slate-500 dark:text-slate-400">（未命名）</span>}
+                      {t.name || <span className="text-slate-600 dark:text-slate-400">（未命名）</span>}
                     </span>
                     {unreadIds.has(t.id) && (
                       <span
@@ -212,7 +212,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
                   {t.host}
                 </td>
                 <td className="px-2 py-1 font-mono text-slate-600 dark:text-slate-300">
-                  {t.resolved_ip ?? <span className="text-slate-500 dark:text-slate-400">-</span>}
+                  {t.resolved_ip ?? <span className="text-slate-600 dark:text-slate-400">-</span>}
                 </td>
                 <td className="px-2 py-1 text-center">
                   <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] ${statusBadgeClass(t.status)}`}>
@@ -225,20 +225,20 @@ const TargetTable: React.FC<TargetTableProps> = ({
                 <td className="px-2 py-1 text-right font-mono text-slate-600 dark:text-slate-300">{fmtMs(t.avg_rtt_ms)}</td>
                 <td className="px-2 py-1 text-right font-mono text-slate-600 dark:text-slate-300">{fmtMs(t.min_rtt_ms)}</td>
                 <td className="px-2 py-1 text-right font-mono text-slate-600 dark:text-slate-300">{fmtMs(t.max_rtt_ms)}</td>
-                <td className={`px-2 py-1 text-right font-mono ${t.loss_pct > 0 ? "text-red-600 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}`}>
+                <td className={`px-2 py-1 text-right font-mono ${t.loss_pct > 0 ? "text-red-700 dark:text-red-400" : "text-slate-600 dark:text-slate-300"}`}>
                   {fmtPct(t.loss_pct)}
                 </td>
                 <td className="px-2 py-1 text-right font-mono">
-                  <span className="text-emerald-600 dark:text-emerald-400">{t.received}</span>
-                  <span className="text-slate-500 dark:text-slate-400">/</span>
-                  <span className="text-red-600 dark:text-red-400">{t.failed}</span>
+                  <span className="text-emerald-700 dark:text-emerald-400">{t.received}</span>
+                  <span className="text-slate-600 dark:text-slate-400">/</span>
+                  <span className="text-red-700 dark:text-red-400">{t.failed}</span>
                 </td>
                 <td className="px-2 py-1">
                   <div className="flex justify-center">
                     <Sparkline data={t.history} slots={historyLen} />
                   </div>
                 </td>
-                <td className="px-2 py-1 text-right font-mono text-slate-500 dark:text-slate-400">
+                <td className="px-2 py-1 text-right font-mono text-slate-600 dark:text-slate-400">
                   {fmtTime(t.last_success_ts)}
                 </td>
               </tr>
@@ -246,7 +246,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
           })}
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={COLS.length} className="px-3 py-10 text-center text-slate-500 dark:text-slate-400">
+              <td colSpan={COLS.length} className="px-3 py-10 text-center text-slate-600 dark:text-slate-400">
                 没有匹配的目标
               </td>
             </tr>

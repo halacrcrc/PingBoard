@@ -116,7 +116,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
         {/* 状态文字与左侧指示灯配色一致：运行中绿色、已停止灰色（绿=正常/活动） */}
         <span
           className={`text-xs whitespace-nowrap ${
-            running ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
+            running ? "text-emerald-700 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"
           }`}
         >
           {running ? (
