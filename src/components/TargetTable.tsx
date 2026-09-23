@@ -159,7 +159,10 @@ const TargetTable: React.FC<TargetTableProps> = ({
                 ) : (
                   <>
                     {c.label}
-                    {c.key === sortKey && <span className="ml-1 text-sky-500">{sortDir === "asc" ? "▲" : "▼"}</span>}
+                    {/* 表头底为 slate-100/slate-800：sky-500 在浅色底仅 2.53:1，改 sky-700 → 5.42:1 */}
+                    {c.key === sortKey && (
+                      <span className="ml-1 text-sky-700 dark:text-sky-400">{sortDir === "asc" ? "▲" : "▼"}</span>
+                    )}
                   </>
                 )}
               </th>

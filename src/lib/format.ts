@@ -95,7 +95,8 @@ export function statusBadgeClass(s: Status): string {
       return "bg-sky-600 text-white";
     case "idle":
     default:
-      return "bg-slate-400 text-white";
+      // slate-500 起白字才达 WCAG AA（slate-400 仅 2.56:1，slate-500 → 4.76:1）
+      return "bg-slate-500 text-white";
   }
 }
 

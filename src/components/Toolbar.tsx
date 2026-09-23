@@ -234,7 +234,22 @@ const Toolbar: React.FC<ToolbarProps> = ({
           placeholder="搜索备注名 / 主机 / IP"
           className="h-7 w-full pl-7 pr-2 rounded border bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
-        <span className="absolute left-2 top-1 text-slate-400 text-xs">🔍</span>
+        {/* 自绘 🔍：emoji 由彩色字形渲染，color 对其无效、无法控制对比度；
+            flex 居中不依赖字体行高；pointer-events-none 避免遮挡输入框左缘点击 */}
+        <span className="absolute inset-y-0 left-2 flex items-center pointer-events-none text-slate-500 dark:text-slate-400">
+          <svg
+            viewBox="0 0 16 16"
+            className="w-3 h-3"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="6.8" cy="6.8" r="4.3" />
+            <path d="M10.2 10.2 13.6 13.6" />
+          </svg>
+        </span>
       </div>
 
       {/* 主题切换：窄视口退化为纯图标（保留 title 与无障碍），宽视口保持「🌙 深色 / ☀️ 浅色」 */}

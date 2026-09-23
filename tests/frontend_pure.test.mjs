@@ -235,6 +235,19 @@ check("statusLabel 全覆盖且不含 unknown 分支遗漏", () => {
   eq(fmt.statusLabel("idle"), "未开始");
 });
 
+check("statusBadgeClass 各状态底色（idle 须为 slate-500：白字对比度 4.76:1）", () => {
+  const idle = fmt.statusBadgeClass("idle");
+  if (idle.includes("bg-slate-400"))
+    throw new Error("idle 不得回退 bg-slate-400（白字仅 2.56:1，低于 WCAG AA 4.5:1）");
+  if (!idle.includes("bg-slate-500")) throw new Error(`idle 应为 bg-slate-500，实得「${idle}」`);
+  if (!idle.includes("text-white")) throw new Error("idle 应为白字");
+  // 其余状态底色不得顺带改动（语义色，另议）
+  const want = { ok: "bg-emerald-600", timeout: "bg-amber-600", failed: "bg-red-600", resolving: "bg-sky-600" };
+  for (const [s, cls] of Object.entries(want)) {
+    if (!fmt.statusBadgeClass(s).includes(cls)) throw new Error(`${s} 底色应为 ${cls}`);
+  }
+});
+
 /* ==================== Round 2 回归：修复复验（QA 独立追加） ==================== */
 
 check("R2 修复复验：前导/末段八位组越界 → null", () => {
