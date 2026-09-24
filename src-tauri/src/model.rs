@@ -138,6 +138,18 @@ pub struct PingSettings {
     /// 每主机保留条数（50 / 200 / 1000）
     #[serde(default = "default_log_keep")]
     pub events_keep: usize,
+    /// 界面缩放（百分比，合法区间 50..=200 由 normalize_settings 钳制；100 = 不缩放）
+    ///
+    /// ⚠️ 必须走自定义 `deserialize_with`：非法值（字符串 / 越界数字等）一律降级为 100，
+    /// 绝不让整份配置反序列化失败（否则丢用户主机列表，同 events_level 的高危防护）。
+    #[serde(
+        default = "default_ui_scale",
+        deserialize_with = "deserialize_ui_scale"
+    )]
+    pub ui_scale: u8,
+    /// 界面字体族名（None 或空串 = 系统默认，仿 events_dir 的模式）
+    #[serde(default)]
+    pub ui_font_family: Option<String>,
 }
 
 impl Default for PingSettings {
@@ -157,6 +169,8 @@ impl Default for PingSettings {
             events_persist: true,
             events_dir: None,
             events_keep: default_log_keep(),
+            ui_scale: default_ui_scale(),
+            ui_font_family: None,
         }
     }
 }
@@ -164,6 +178,29 @@ impl Default for PingSettings {
 /// `limit_max_threads` 的缺省值（true）：保证旧配置加载后仍默认启用并发上限
 fn default_true() -> bool {
     true
+}
+
+/// `ui_scale` 的缺省值（100，即不缩放）
+fn default_ui_scale() -> u8 {
+    100
+}
+
+/// `ui_scale` 的自定义反序列化：**非法值一律降级为 100，绝不失败**。
+///
+/// 高危防护（同 `events_level`）：该字段被写成字符串（如手工改配置）/ 越界数字
+/// （u8 最大 255，缩放无理由超过）时，普通 `Deserialize` 会让整份 `AppConfig`
+/// 反序列化失败 → 回落默认、清空用户主机列表。此处无论遇到什么都返回合法值。
+pub fn deserialize_ui_scale<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // 用 Value 作为中间载体：任意 JSON 值都能被接受，解析失败也退化为 None。
+    let value = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    let n = value.as_ref().and_then(|v| v.as_u64());
+    Ok(match n {
+        Some(n) if n <= u8::MAX as u64 => n as u8,
+        _ => default_ui_scale(),
+    })
 }
 
 /// 聚合快照：既作为 ping-snapshot 事件的 payload，也作为 get_state 的返回值
@@ -255,6 +292,8 @@ mod tests {
             events_persist: false,
             events_dir: Some("D:\\pb-events".to_string()),
             events_keep: 1000,
+            ui_scale: 125,
+            ui_font_family: Some("Consolas".to_string()),
         };
         let js = serde_json::to_string(&s).unwrap();
         let back: PingSettings = serde_json::from_str(&js).unwrap();
@@ -272,6 +311,8 @@ mod tests {
         assert_eq!(back.events_persist, s.events_persist);
         assert_eq!(back.events_dir, s.events_dir);
         assert_eq!(back.events_keep, s.events_keep);
+        assert_eq!(back.ui_scale, s.ui_scale);
+        assert_eq!(back.ui_font_family, s.ui_font_family);
     }
 
     /// 旧配置兼容（v1.1 新增字段）：不含 limit_max_threads 的 JSON 必须能加载且缺省为 true
@@ -419,5 +460,53 @@ mod tests {
             let s: PingSettings = serde_json::from_str(&format!("{{\"events_keep\":{}}}", k)).unwrap();
             assert_eq!(s.events_keep, k);
         }
+    }
+
+    /* ===================== 界面缩放 / 字体：旧配置兼容（不丢 targets） ===================== */
+
+    /// 旧配置（v1.1.6 及更早，无 ui_scale / ui_font_family）：必须完好加载且缺省正确。
+    #[test]
+    fn qa_old_config_without_ui_fields_defaults() {
+        let old = r#"{"version":1,"settings":{"interval_ms":800,"timeout_ms":1500,"payload_size":32,"ttl":128,"max_threads":256,"beep_on_fail":false,"auto_start":false,"history_len":60},"targets":[{"name":"阿里 DNS","host":"223.5.5.5","enabled":true}]}"#;
+        let cfg: AppConfig = serde_json::from_str(old).unwrap();
+        assert_eq!(cfg.settings.ui_scale, 100, "ui_scale 缺省应为 100");
+        assert!(cfg.settings.ui_font_family.is_none(), "ui_font_family 缺省应为 None");
+        assert_eq!(cfg.targets.len(), 1, "旧配置的主机列表必须保留");
+        assert_eq!(cfg.targets[0].host, "223.5.5.5");
+
+        // 空设置对象同样缺省正确
+        let s: PingSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(s.ui_scale, 100);
+        assert!(s.ui_font_family.is_none());
+    }
+
+    /// 高危防护（同 events_level）：ui_scale 非法值一律降级 100，绝不整份失败。
+    #[test]
+    fn qa_invalid_ui_scale_falls_back_to_100() {
+        // 字符串值（手工改配置的典型形态）
+        let s: PingSettings =
+            serde_json::from_str(r#"{"ui_scale":"abc"}"#).unwrap();
+        assert_eq!(s.ui_scale, 100, "字符串值应降级为 100");
+        // 越界数字（u8 装不下的 300）
+        let s2: PingSettings = serde_json::from_str("{\"ui_scale\":300}").unwrap();
+        assert_eq!(s2.ui_scale, 100, "越界数字应降级为 100");
+        // null / 布尔 / 浮点同样不报错
+        for raw in ["{\"ui_scale\":null}", "{\"ui_scale\":true}", "{\"ui_scale\":1.5}"] {
+            let s3: PingSettings = serde_json::from_str(raw).unwrap();
+            assert_eq!(s3.ui_scale, 100, "非法值应降级：{}", raw);
+        }
+        // 合法范围内的值原样保留
+        let ok: PingSettings = serde_json::from_str("{\"ui_scale\":125}").unwrap();
+        assert_eq!(ok.ui_scale, 125);
+    }
+
+    /// ui_font_family 仿 events_dir：None / 空串都表示「系统默认」；显式值可往返。
+    #[test]
+    fn qa_ui_font_family_roundtrip() {
+        let s: PingSettings = serde_json::from_str(r#"{"ui_font_family":"Consolas"}"#).unwrap();
+        assert_eq!(s.ui_font_family.as_deref(), Some("Consolas"));
+        // 空串能加载（归一为 None 由 stats::normalize_settings 处理）
+        let s2: PingSettings = serde_json::from_str(r#"{"ui_font_family":""}"#).unwrap();
+        assert_eq!(s2.ui_font_family.as_deref(), Some(""));
     }
 }

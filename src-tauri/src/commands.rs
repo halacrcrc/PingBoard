@@ -178,3 +178,12 @@ pub async fn set_target_events(
     state.set_target_events(id, events_on)?;
     state.save_config(&app)
 }
+
+/// 枚举系统已安装字体族名（读注册表 HKLM / HKCU Fonts 键，无子进程）。
+/// 注册表读取放入阻塞线程池，避免大量枚举时卡住异步运行时。
+#[tauri::command]
+pub async fn list_system_fonts() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(crate::fonts::list_system_fonts)
+        .await
+        .map_err(|e| format!("枚举字体任务失败：{}", e))
+}

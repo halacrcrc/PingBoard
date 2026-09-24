@@ -94,7 +94,7 @@ const dlg = await loadPure("src/components/AddTargetsDialog.tsx");
 const fmt = await loadPure("src/lib/format.ts");
 const settings = await loadPure("src/components/SettingsDialog.tsx");
 
-const { expandIpRange, parseBatch } = dlg;
+const { expandIpRange, parseBatch, findDuplicateHosts } = dlg;
 
 /* ---------- expandIpRange ---------- */
 check("expandIpRange('192.168.1.1-254') 长度 254 且首尾正确", () => {
@@ -319,6 +319,37 @@ check("R2 修复复验：parseBatch 超大区间仍截断到 1024", () => {
   eq(parseBatch("10.0.0.1-10.255.255.254").length, 1024);
 });
 
+/* ============ Round 5 固化：跨批次重复检测（单个添加曾绕过，E4 回归保护） ============ */
+// 依据：三条提交路径（单个 / 批量 / 文件）必须共用同一套重复检测；
+// 比较规则 = host 去首尾空白 + 转小写，重复时返回 host 原文供弹窗展示。
+
+check("findDuplicateHosts 命中已有目标（大小写不敏感 + 去首尾空白）", () => {
+  eq(
+    findDuplicateHosts(
+      [{ host: "WWW.Baidu.COM", name: "x" }, { host: " 223.5.5.5 ", name: "y" }],
+      ["www.baidu.com", "223.5.5.5"]
+    ),
+    ["WWW.Baidu.COM", " 223.5.5.5 "],
+    "重复项应返回 host 原文"
+  );
+});
+
+check("findDuplicateHosts 无重复 → 空数组；空输入 → 空数组", () => {
+  eq(findDuplicateHosts([{ host: "9.9.9.9", name: "x" }], ["8.8.8.8"]), []);
+  eq(findDuplicateHosts([], ["8.8.8.8"]), []);
+  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], []), []);
+});
+
+check("findDuplicateHosts 三条路径同口径：单条输入与批量解析结果检测一致", () => {
+  // 单个添加路径：[{host: 输入框原文}]；批量路径：parseBatch 输出 —— 两者过同一函数必须等价
+  const existing = ["192.0.2.1"];
+  const single = findDuplicateHosts([{ host: "192.0.2.1", name: "192.0.2.1" }], existing);
+  const batch = findDuplicateHosts(parseBatch("192.0.2.1"), existing);
+  eq(single.length, 1, "单个添加必须检出重复（曾直接 doAdd 绕过检测）");
+  eq(batch.length, 1);
+  eq(single[0].toLowerCase(), batch[0].toLowerCase(), "命中 host 一致");
+});
+
 /* ============ Round 3 固化：defaultEventsFile（设置对话框默认事件文件路径） ============ */
 // 依据：默认事件目录 = app_config_dir（与配置文件同目录），默认文件名 = pingboard-events.jsonl。
 // 该纯函数从配置文件绝对路径推导默认事件文件路径，供「事件保存目录」在默认态显示具体绝对路径。
@@ -382,6 +413,68 @@ check("defaultEventsFile 属性式：目录部分与输入完全一致，文件�
     eq(out[i], sep, `分隔符应与输入一致：${p}`);
     // ③ 文件名恒为 pingboard-events.jsonl
     eq(out.slice(i + 1), EVENTS_FILE_NAME, `文件名应为 ${EVENTS_FILE_NAME}：${p}`);
+  }
+});
+
+/* ============ Round 4 固化：界面缩放 / 字体（E3） ============ */
+// 依据：zoom 赋值串 = 百分比 / 100，100 或不合法值清空内联样式；
+// 字体 = 「"族名", 默认栈」，默认栈必须与 src/styles.css body 的 font-family 一致。
+const { zoomStyle, fontFamilyStyle, DEFAULT_FONT_STACK } = fmt;
+
+check("zoomStyle 100 → 空串（清除内联缩放，恢复默认）", () => {
+  eq(zoomStyle(100), "");
+});
+
+check("zoomStyle 预设档位 → 正确小数字符串", () => {
+  eq(zoomStyle(90), "0.9");
+  eq(zoomStyle(110), "1.1");
+  eq(zoomStyle(125), "1.25");
+  eq(zoomStyle(50), "0.5");
+  eq(zoomStyle(200), "2");
+});
+
+check("zoomStyle 越界值钳制到 50..=200（与后端 normalize_settings 口径一致）", () => {
+  eq(zoomStyle(10), "0.5", "低于 50 钳到 50");
+  eq(zoomStyle(300), "2", "高于 200 钳到 200");
+  eq(zoomStyle(0), "0.5");
+  eq(zoomStyle(-125), "0.5");
+});
+
+check("zoomStyle 不合法输入 → 空串（不产生 NaN/Infinity 赋值）", () => {
+  eq(zoomStyle(NaN), "");
+  eq(zoomStyle(undefined), "");
+});
+
+check("fontFamilyStyle 空值/空白 → 空串（恢复 styles.css 默认字体栈）", () => {
+  eq(fontFamilyStyle(null), "");
+  eq(fontFamilyStyle(undefined), "");
+  eq(fontFamilyStyle(""), "");
+  eq(fontFamilyStyle("   "), "");
+});
+
+check("fontFamilyStyle 自定义族名 → 引号族名 + 默认栈兜底", () => {
+  eq(
+    fontFamilyStyle("Consolas"),
+    '"Consolas", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif'
+  );
+  // 带首尾空白的族名先 trim
+  eq(
+    fontFamilyStyle("  宋体  "),
+    '"宋体", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif'
+  );
+});
+
+check("DEFAULT_FONT_STACK 与 src/styles.css body 字体栈逐字符一致（忽略空白）", () => {
+  const css = fs.readFileSync(path.join(projectRoot, "src", "styles.css"), "utf8");
+  const m = css.match(/body\s*\{([^}]*)\}/);
+  if (!m) throw new Error("styles.css 中未找到 body 规则");
+  const stackInCss = m[1].replace(/\s+/g, "");
+  const stackConst = DEFAULT_FONT_STACK.replace(/\s+/g, "");
+  if (!stackInCss.includes(stackConst)) {
+    throw new Error(`字体栈不同步：styles.css 实际「${stackInCss}」 vs 常量「${stackConst}」`);
+  }
+  if (!stackInCss.includes("font-family:")) {
+    throw new Error("body 规则中未找到 font-family 声明");
   }
 });
 

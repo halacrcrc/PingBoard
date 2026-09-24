@@ -5,7 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { EventLevel, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
-import { fmtTime, isUnreadKind } from "./lib/format";
+import { fmtTime, fontFamilyStyle, isUnreadKind, zoomStyle } from "./lib/format";
 import Toolbar from "./components/Toolbar";
 import TargetTable, { type SortKey } from "./components/TargetTable";
 import StatusBar from "./components/StatusBar";
@@ -30,6 +30,8 @@ const DEFAULT_SETTINGS: PingSettings = {
   events_persist: true,
   events_dir: null,
   events_keep: 200,
+  ui_scale: 100,
+  ui_font_family: null,
 };
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -232,6 +234,21 @@ const App: React.FC = () => {
     localStorage.setItem("pb-theme", theme);
   }, [theme]);
 
+  /* ------------------------- 界面缩放 / 字体 ------------------------- */
+
+  // ⚠️ 依赖只写原始值（ui_scale / ui_font_family），绝不依赖 settings 对象引用：
+  // App 每 500ms 收到快照都会重建 settings 对象，依赖对象引用会导致 effect 每 500ms 重跑。
+  const uiScale = snapshot.settings.ui_scale;
+  const uiFontFamily = snapshot.settings.ui_font_family;
+
+  React.useEffect(() => {
+    document.documentElement.style.zoom = zoomStyle(uiScale);
+  }, [uiScale]);
+
+  React.useEffect(() => {
+    document.body.style.fontFamily = fontFamilyStyle(uiFontFamily);
+  }, [uiFontFamily]);
+
   /* ------------------------- 窗口标题 ------------------------- */
 
   React.useEffect(() => {
@@ -299,7 +316,11 @@ const App: React.FC = () => {
 
   const handleStartAll = () => guard(() => api.startPinging(null));
   const handleStopAll = () => guard(() => api.stopPinging(null));
-  const handleResetAll = () => guard(() => api.resetStats(null));
+  /** 清空统计：成功后同步清掉全部未读红点（语义 = 已知悉全部故障；运行中的新故障照常重新计红点） */
+  const handleResetAll = () =>
+    guard(() => api.resetStats(null)).then(() => {
+      setUnread({});
+    });
 
   const handleToggleEnabled = (id: number, enabled: boolean) => {
     const t = snapshot.targets.find((x) => x.id === id);

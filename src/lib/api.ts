@@ -77,3 +77,7 @@ export const exportEvents = (
 /** 设置单主机「记录事件」开关并持久化 */
 export const setTargetEvents = (id: number, eventsOn: boolean): Promise<void> =>
   invoke<void>("set_target_events", { id, eventsOn });
+
+/** 枚举系统已安装字体族名（后端读注册表，去重排序；失败时返回空数组由调用方兜底） */
+export const listSystemFonts = (): Promise<string[]> =>
+  invoke<string[]>("list_system_fonts");

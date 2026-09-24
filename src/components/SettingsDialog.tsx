@@ -50,6 +50,8 @@ const LEVEL_OPTIONS: { value: EventLevel; label: string }[] = [
 ];
 /** 每主机保留条数三选一 */
 const KEEP_OPTIONS: number[] = [50, 200, 1000];
+/** 界面缩放四档（百分比；后端 50..=200 钳制，100 = 默认） */
+const SCALE_OPTIONS: number[] = [90, 100, 110, 125];
 
 /* ------------------------------- 样式常量 ------------------------------- */
 
@@ -195,6 +197,8 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [configPath, setConfigPath] = React.useState<string>("");
+  /** 系统字体族名列表：进入对话框时懒加载；枚举失败保持空数组（下拉只剩「系统默认」） */
+  const [fontOptions, setFontOptions] = React.useState<string[]>([]);
 
   // 仅在对话框「刚刚打开」时把外部设置拷进本地草稿。
   // ⚠️ 不能把 settings 放进依赖数组：App 每 500ms 推送一次快照，settings 每次都是新对象，
@@ -208,6 +212,11 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
     setError(null);
     setBusy(false);
     api.getConfigPath().then(setConfigPath).catch(() => setConfigPath(""));
+    // 系统字体懒加载：只在每次打开时请求一次；失败静默（下拉只剩「系统默认」，不禁用其余功能）
+    api
+      .listSystemFonts()
+      .then((list) => setFontOptions(Array.isArray(list) ? list : []))
+      .catch(() => setFontOptions([]));
     // 故意不写依赖数组：每次渲染后执行，但仅在 justOpened 时做事。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
@@ -237,6 +246,17 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
   const dirValue = dirIsDefault ? defaultEventsPath : (draft.events_dir as string);
   /** 具体路径 / 兜底文案（绝不显示空白或半截路径） */
   const dirDisplay = dirValue || "（正在读取默认目录…）";
+
+  /** 界面缩放：当前值不在预设档位时（手改配置的旧值）追加为选项，避免下拉显示空白 */
+  const scaleOptions = SCALE_OPTIONS.includes(draft.ui_scale)
+    ? SCALE_OPTIONS
+    : [...SCALE_OPTIONS, draft.ui_scale].sort((a, b) => a - b);
+  /** 界面字体：当前族名不在系统枚举结果中（字体已卸载）时追加保留，避免静默丢用户配置 */
+  const currentFamily = (draft.ui_font_family ?? "").trim();
+  const fontFamilyOptions =
+    currentFamily && !fontOptions.includes(currentFamily)
+      ? [...fontOptions, currentFamily].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"))
+      : fontOptions;
 
   const save = async () => {
     // 前端校验（后端也会再校验一次）
@@ -354,6 +374,41 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
                     checked={draft.auto_start}
                     onChange={(v) => setDraft((d) => ({ ...d, auto_start: v }))}
                   />
+                </Field>
+                <Field label="界面缩放" hint="默认 100%">
+                  <select
+                    className={inputCls}
+                    value={String(draft.ui_scale)}
+                    onChange={(e) => setDraft((d) => ({ ...d, ui_scale: Number(e.target.value) }))}
+                  >
+                    {scaleOptions.map((s) => (
+                      <option key={s} value={String(s)}>
+                        {s === 100 ? "100%（默认）" : `${s}%`}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label="界面字体"
+                  hint={fontOptions.length > 0 ? "留空 = 系统默认" : "枚举失败，仅默认"}
+                >
+                  <select
+                    className={inputCls}
+                    value={currentFamily}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        ui_font_family: e.target.value === "" ? null : e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">系统默认</option>
+                    {fontFamilyOptions.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
               </div>
             </Card>

@@ -1,5 +1,6 @@
 // 顶部工具栏：应用名、操作按钮、搜索框、主题切换与状态指示灯
 import React from "react";
+import { currentZoomFactor } from "../lib/format";
 
 export interface ToolbarProps {
   running: boolean;
@@ -78,7 +79,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
     const el = exportBtnRef.current;
     if (el) {
       const r = el.getBoundingClientRect();
-      setExportPos({ top: r.bottom + 4, left: r.left });
+      // rect 是视觉坐标（已含根元素 zoom 缩放），而 fixed 的 top/left 会被 zoom 再放大
+      // → 先除以缩放系数换算回 CSS 像素，否则界面缩放 ≠ 100% 时菜单会错位。
+      const zf = currentZoomFactor();
+      setExportPos({ top: r.bottom / zf + 4, left: r.left / zf });
     }
     setExportOpen(true);
   };

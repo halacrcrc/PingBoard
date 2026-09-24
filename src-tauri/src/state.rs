@@ -908,6 +908,8 @@ mod tests {
                 events_persist: false,
                 events_dir: None,
                 events_keep: 200,
+                ui_scale: 100,
+                ui_font_family: None,
             },
             targets: targets
                 .into_iter()
@@ -944,6 +946,8 @@ mod tests {
                 events_persist: false,
                 events_dir: None,
                 events_keep: 200,
+                ui_scale: 100,
+                ui_font_family: None,
             },
             targets: Vec::new(),
         };

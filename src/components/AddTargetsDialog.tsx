@@ -135,6 +135,20 @@ export function tableToBatchText(rows: string[][]): string {
   return lines.join("\n");
 }
 
+/**
+ * 跨批次重复检测（纯函数）：返回 entries 中与已有目标重复的 host 原文。
+ * 比较规则与后端口径一致：host 去首尾空白后转小写；重复判定只在前端 UI 拦截。
+ * 单个添加、批量粘贴与文件导入三条路径共用，保证口径一致。
+ */
+export function findDuplicateHosts(entries: TargetEntry[], existingHosts: string[]): string[] {
+  const set = new Set(existingHosts.map((h) => h.trim().toLowerCase()));
+  const dups: string[] = [];
+  for (const e of entries) {
+    if (set.has(e.host.trim().toLowerCase())) dups.push(e.host);
+  }
+  return dups;
+}
+
 const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts }) => {
   const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
@@ -184,14 +198,11 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
   // 当前待添加列表（批量页 = parsed，文件页 = fileEntries，单条页 = []）
   const currentEntries = tab === "file" ? fileEntries : parsed;
 
-  // 当前待添加列表中与「已有目标」重复的条目（比较规则：host 去首尾空白后转小写）
+  // 当前待添加列表中与「已有目标」重复的条目（比较规则见 findDuplicateHosts）
   const dupInfo = React.useMemo(() => {
-    const dups: string[] = [];
-    for (const e of currentEntries) {
-      if (existingSet.has(e.host.trim().toLowerCase())) dups.push(e.host);
-    }
-    return { count: dups.length, hosts: dups };
-  }, [currentEntries, existingSet]);
+    const hosts = findDuplicateHosts(currentEntries, existingHosts);
+    return { count: hosts.length, hosts };
+  }, [currentEntries, existingHosts]);
 
   if (!open) return null;
 
@@ -221,14 +232,15 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     }
   };
 
-  const onSubmitSingle = async () => {
+  /** 单个添加提交：与批量 / 文件路径共用同一套跨批次重复检测与确认弹窗（修复曾直接 doAdd 绕过检测） */
+  const onSubmitSingle = () => {
     const h = host.trim();
     if (!h) {
       setError("请输入主机名或 IP 地址");
       return;
     }
-    const n = name.trim();
-    await doAdd([{ host: h, name: n || h }]);
+    const entry: TargetEntry = { host: h, name: name.trim() || h };
+    submitEntries([entry], findDuplicateHosts([entry], existingHosts));
   };
 
   /** 批量 / 文件提交入口：存在重复时弹确认框让用户选择，否则直接提交 */

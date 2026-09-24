@@ -1,6 +1,6 @@
 [package]
 name = "pingboard"
-version = "1.1.6"
+version = "1.1.7"
 description = "PingBoard — 多主机 Ping 监视器"
 authors = ["PingBoard"]
 edition = "2021"
@@ -30,6 +30,8 @@ windows = { version = "0.61", features = [
   "Win32_NetworkManagement_IpHelper",
   "Win32_Networking_WinSock",
 ] }
+# 系统字体枚举：读注册表 Fonts 键（纯注册表读取，无子进程）
+winreg = "0.55"
 # 传递依赖构建修复（见文件末尾说明）
 indexmap = { version = "1", features = ["std"] }
 

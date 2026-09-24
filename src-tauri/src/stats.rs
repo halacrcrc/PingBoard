@@ -86,6 +86,14 @@ pub fn normalize_settings(s: &mut PingSettings) {
         .as_ref()
         .map(|d| d.trim().to_string())
         .filter(|d| !d.is_empty());
+    // 界面缩放：钳制到 50..=200（低于 50 或高于 200 的旧/手改配置回到边界值）
+    s.ui_scale = s.ui_scale.clamp(50, 200);
+    // 界面字体：trim 后空串归一为 None（= 系统默认，与 events_dir 同口径）
+    s.ui_font_family = s
+        .ui_font_family
+        .as_ref()
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty());
 }
 
 #[cfg(test)]
@@ -176,6 +184,8 @@ mod tests {
             events_persist: true,
             events_dir: None,
             events_keep: 200,
+            ui_scale: 100,
+            ui_font_family: None,
         };
         normalize_settings(&mut s);
         assert_eq!(s.interval_ms, 100);
@@ -288,6 +298,8 @@ mod tests {
             events_persist: true,
             events_dir: None,
             events_keep: 123, // 非法值 → 归一到 200
+            ui_scale: 100,    // 由下方专项用例覆盖边界
+            ui_font_family: None,
         };
         normalize_settings(&mut s);
         assert_eq!(s.interval_ms, 600_000);
@@ -338,5 +350,45 @@ mod tests {
         push_history(&mut h, Some(1.0), 0);
         push_history(&mut h, None, 0);
         assert_eq!(h.len(), 2);
+    }
+
+    /// 界面缩放钳制：低于 50 → 50，高于 200 → 200，合法值原样保留
+    #[test]
+    fn qa_normalize_ui_scale_clamps_50_200() {
+        let mut s = PingSettings::default();
+        s.ui_scale = 10;
+        normalize_settings(&mut s);
+        assert_eq!(s.ui_scale, 50, "低于下界应钳到 50");
+
+        s.ui_scale = 255;
+        normalize_settings(&mut s);
+        assert_eq!(s.ui_scale, 200, "高于上界应钳到 200");
+
+        for v in [50u8, 90, 100, 110, 125, 200] {
+            s.ui_scale = v;
+            normalize_settings(&mut s);
+            assert_eq!(s.ui_scale, v, "合法缩放 {} 不应被改动", v);
+        }
+    }
+
+    /// 界面字体归一：空串 / 纯空白 → None；非空 trim 后保留
+    #[test]
+    fn qa_normalize_ui_font_family() {
+        let mut s = PingSettings::default();
+        s.ui_font_family = Some("   ".to_string());
+        normalize_settings(&mut s);
+        assert!(s.ui_font_family.is_none(), "纯空白字体名应归一为 None");
+
+        s.ui_font_family = Some("  Microsoft YaHei UI  ".to_string());
+        normalize_settings(&mut s);
+        assert_eq!(
+            s.ui_font_family.as_deref(),
+            Some("Microsoft YaHei UI"),
+            "应 trim 保留"
+        );
+
+        s.ui_font_family = None;
+        normalize_settings(&mut s);
+        assert!(s.ui_font_family.is_none(), "None 不应被改动");
     }
 }

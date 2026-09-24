@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod events;
 mod export;
+mod fonts;
 mod import;
 mod model;
 mod pinger;
@@ -34,6 +35,7 @@ pub fn run() {
             commands::clear_events,
             commands::export_events,
             commands::set_target_events,
+            commands::list_system_fonts,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -56,7 +56,7 @@ const COLS: Col[] = [
   { key: "name", label: "备注名", align: "left", className: "min-w-[100px]" },
   { key: "host", label: "主机名", align: "left", className: "min-w-[124px]" },
   { key: "resolved_ip", label: "IP 地址", align: "left", className: "min-w-[112px]" },
-  { key: "status", label: "状态", align: "center", className: "w-20" },
+  { key: "status", label: "状态", align: "center", className: "w-20 min-w-[64px]" },
   { key: "last_rtt_ms", label: "延迟(ms)", align: "right", className: "w-20" },
   { key: "avg_rtt_ms", label: "平均", align: "right", className: "w-20" },
   { key: "min_rtt_ms", label: "最小", align: "right", className: "w-20" },
@@ -215,7 +215,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
                   {t.resolved_ip ?? <span className="text-slate-600 dark:text-slate-400">-</span>}
                 </td>
                 <td className="px-2 py-1 text-center">
-                  <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] ${statusBadgeClass(t.status)}`}>
+                  <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap ${statusBadgeClass(t.status)}`}>
                     {statusLabel(t.status)}
                   </span>
                 </td>

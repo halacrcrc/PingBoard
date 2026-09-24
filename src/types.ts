@@ -52,6 +52,10 @@ export interface PingSettings {
   events_dir: string | null;
   /** 每主机保留条数（50 / 200 / 1000） */
   events_keep: number;
+  /** 界面缩放百分比（50..=200，100 = 不缩放；后端钳制） */
+  ui_scale: number;
+  /** 界面字体族名（null 或空串 = 系统默认） */
+  ui_font_family: string | null;
 }
 
 /** 聚合快照（对应 Rust 的 Snapshot），既用于 ping-snapshot 事件也用于 get_state 命令 */

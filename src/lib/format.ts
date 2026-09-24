@@ -148,3 +148,43 @@ export function eventKindLabel(kind: EventKind): string {
 export function isUnreadKind(kind: EventKind): boolean {
   return kind === "fault" || kind === "unreachable" || kind === "dns_fail";
 }
+
+/** 默认字体栈：必须与 src/styles.css 中 body 的 font-family 完全一致（守护测试校验） */
+export const DEFAULT_FONT_STACK =
+  '"Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif';
+
+/**
+ * 界面缩放百分比 → document.documentElement.style.zoom 的赋值字符串（纯函数）。
+ * 100（或不合法值）返回空串 = 清除内联缩放、恢复默认；
+ * 其余钳制到 50..=200 后换算为小数（与后端 stats::normalize_settings 的 50..=200 一致）。
+ */
+export function zoomStyle(uiScale: number): string {
+  const n = Math.round(Number(uiScale));
+  if (!Number.isFinite(n) || n === 100) return "";
+  const clamped = Math.min(200, Math.max(50, n));
+  return String(clamped / 100);
+}
+
+/**
+ * 自定义字体族名 → document.body.style.fontFamily 的赋值字符串（纯函数）。
+ * null / 空串 / 纯空白返回空串 = 恢复系统默认（styles.css 里的字体栈）；
+ * 否则「"族名", 默认栈」——默认栈兜底，族名缺字时逐级降级。
+ */
+export function fontFamilyStyle(family: string | null | undefined): string {
+  const f = (family ?? "").trim();
+  if (!f) return "";
+  return `"${f}", ${DEFAULT_FONT_STACK}`;
+}
+
+/**
+ * 当前根元素缩放系数（zoom 100% / 未设置时为 1）。
+ *
+ * ⚠️ zoom 下 fixed 定位换算：`getBoundingClientRect()` 返回的是**视觉坐标**（已含缩放），
+ * 而给 fixed 元素设置 `style.top/left` 时数值会被根元素 zoom **再放大一次**
+ * → 用 rect 值定位会随缩放偏离（125% 时偏 25%）。
+ * 修法：定位前先把视觉坐标除以本系数换算回 CSS 像素。
+ */
+export function currentZoomFactor(): number {
+  const z = parseFloat(document.documentElement.style.zoom);
+  return Number.isFinite(z) && z > 0 ? z : 1;
+}
