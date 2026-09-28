@@ -38,14 +38,20 @@
 
 ## 安装
 
-提供两种安装包，**程序功能完全相同**，区别只在于「如何为缺失 WebView2 的目标机提供运行时」。
+提供两种安装包（x64）+ 一个实验性 ARM64 包，**程序功能完全相同**，x64 两变体的区别只在
+「如何为缺失 WebView2 的目标机提供运行时」。
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.1.7_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.7_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.8_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.8_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.8_arm64-setup.exe`（**ARM64 实验版**） | ≈ 2.0 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
 
-> v1.1.7 两种变体**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
+> ⚠️ **ARM64 包未经真机测试**（开发机为 x64，无法运行 ARM64 程序验证；仅验证了编译通过与
+> PE 机器类型正确）。ARM64 Windows 设备**不装它也能用**：x64 包可通过 Windows 自带模拟运行。
+> 安装程序本体为 x86 属正常现象（ARM 机器靠系统模拟运行安装器，装出的应用才是原生 ARM64）。
+
+> v1.1.8 三种包**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
 > 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
 > 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
@@ -68,8 +74,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.1.7_x64-setup.exe /S                     :: 安装到默认目录
-PingBoard_1.1.7_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.1.8_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.8_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                     :: 静默卸载
 ```
 
@@ -259,7 +265,7 @@ npx tauri icon docs/app-icon.png
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.7_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.8_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
@@ -353,6 +359,16 @@ pinginfo/
 ---
 
 ## 更新日志
+
+### v1.1.8 — 应用图标微调 + 首个 ARM64 实验包
+
+- **图标：雷达环与光点重新配比。** 两圈雷达环加厚回调（外圈 125 / 内圈 85，上一版的 110/75
+  偏纤细），右上角雷达光点沿原 45° 方向外移，重新完全落在最外圈环带内（上一版环变薄后光点
+  探出了环带）；中心圆点维持柔和浅绿。全套图标（含安装包与 exe 内嵌图标）已重新生成。
+- **新增：Windows ARM64 实验包。** 自本版起随版发布 `...-arm64.exe`（原生 ARM64 编译）。
+  ⚠️ **此包未经真机测试**：开发机为 x64 无法运行 ARM64 程序，仅验证「编译通过 + PE 机器类型
+  `0xAA64` + 安装包结构正确」。ARM64 Windows 设备**不装它也能用**——x64 包可通过 Windows
+  自带模拟运行；本包提供的是原生性能选项。安装程序本体为 x86 属正常现象。
 
 ### v1.1.7 — 界面缩放与字体自定义 + 三处修复
 
