@@ -20,7 +20,7 @@ pub async fn add_targets(
     entries: Vec<TargetEntry>,
 ) -> Result<Vec<u64>, String> {
     let ids = state.add_targets(entries)?;
-    let _ = state.save_config(&app);
+    state.save_config(&app)?;
     Ok(ids)
 }
 

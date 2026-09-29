@@ -320,7 +320,11 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="w-[720px] max-h-[86vh] flex flex-col rounded-lg shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700">
+      <div
+        className="w-[720px] max-h-[86vh] flex flex-col rounded-lg shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+        role="dialog"
+        aria-modal="true"
+      >
         <div className="px-4 h-11 flex items-center justify-between border-b border-slate-200 dark:border-slate-700">
           <div className="font-semibold text-slate-800 dark:text-slate-100">添加主机</div>
           <button className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200" onClick={onClose}>

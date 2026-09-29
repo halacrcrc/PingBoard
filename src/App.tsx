@@ -6,6 +6,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { EventLevel, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
 import { fmtTime, fontFamilyStyle, isUnreadKind, zoomStyle } from "./lib/format";
+import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
 import TargetTable, { type SortKey } from "./components/TargetTable";
 import StatusBar from "./components/StatusBar";
@@ -109,6 +110,7 @@ const App: React.FC = () => {
   const [toast, setToast] = React.useState<string | null>(null);
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [confirmClearLogs, setConfirmClearLogs] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
 
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   /** 保存 ping-snapshot 的取消订阅函数，卸载时判空 + 容错调用 */
@@ -435,19 +437,29 @@ const App: React.FC = () => {
     });
   }, [selected, guard]);
 
-  // 键盘 Delete 删除选中
+  /** 删除选中前先请求确认（键盘 Delete 与工具栏按钮共用同一入口） */
+  const requestDeleteSelected = React.useCallback(() => {
+    if (selected.size === 0) return;
+    setConfirmDelete(true);
+  }, [selected]);
+
+  // 键盘 Delete 删除选中：
+  // ① 任意对话框打开时完全不响应（含确认框自身），避免焦点落在按钮/下拉上时误删；
+  // ② 输入框内打字不响应；
+  // ③ 命中后走确认框，与「清空列表」口径一致（删除后立即落盘，无撤销）。
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const dialogOpen = document.querySelector('[role="dialog"]') !== null;
+      const targetTag = (e.target as HTMLElement | null)?.tagName ?? null;
+      if (shouldIgnoreDeleteKey(targetTag, dialogOpen)) return;
       if (e.key === "Delete" && selected.size > 0) {
         e.preventDefault();
-        deleteSelected();
+        requestDeleteSelected();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, deleteSelected]);
+  }, [selected, requestDeleteSelected]);
 
   const handleExport = async (format: "csv" | "txt" | "html", onlySelected: boolean) => {
     const ids = onlySelected ? [...selected] : null;
@@ -579,7 +591,7 @@ const App: React.FC = () => {
         selectionCount={selected.size}
         onStartSelected={handleStartSelected}
         onStopSelected={handleStopSelected}
-        onDeleteSelected={deleteSelected}
+        onDeleteSelected={requestDeleteSelected}
       />
 
       <div className="flex-1 flex min-h-0">
@@ -708,6 +720,23 @@ const App: React.FC = () => {
         }
         onConfirm={doClearLogs}
         onCancel={() => setConfirmClearLogs(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="删除选中主机"
+        danger
+        confirmText="删除"
+        message={
+          <>
+            确定要删除选中的 <b>{selected.size}</b> 个目标吗？统计数据一并清除，且无法撤销。
+          </>
+        }
+        onConfirm={() => {
+          setConfirmDelete(false);
+          deleteSelected();
+        }}
+        onCancel={() => setConfirmDelete(false)}
       />
 
       {toast && (

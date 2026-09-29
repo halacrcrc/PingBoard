@@ -295,7 +295,11 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, settings, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-[900px] min-w-0 max-h-[calc(100vh_-_2rem)] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl">
+      <div
+        className="w-[900px] min-w-0 max-h-[calc(100vh_-_2rem)] flex flex-col rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+      >
         {/* 顶部区：✕ 贴弹窗右上角（不受滚动条补位约束）；标题卡用 mr-6 保持与滚动区卡片右对齐 */}
         <div className="shrink-0 pl-3 pt-0.5">
           <div className="flex items-center justify-end mb-2 pr-1.5">

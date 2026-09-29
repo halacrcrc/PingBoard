@@ -478,6 +478,64 @@ check("DEFAULT_FONT_STACK 与 src/styles.css body 字体栈逐字符一致（忽
   }
 });
 
+/* ============ Round 6 固化：Delete 键弹层守卫（对话框打开时穿透删除，E5） ============ */
+// 依据（原缺陷）：App 的 window keydown 只排除 INPUT/TEXTAREA，对话框打开时按 Delete 会
+// 穿透到 deleteSelected() → api.removeTargets 删除并立即落盘，无确认、无撤销。
+// 守卫契约：
+//   ① 任意弹层打开（dialogOpen=true）→ 一律忽略，与焦点落在哪个元素无关；
+//   ② 弹层关闭时，仅 INPUT / TEXTAREA 内打字才忽略；其余元素（含 body / null）Delete 生效。
+// dialogOpen 由 App.tsx 取 document.querySelector('[role="dialog"]') !== null，
+// 因此「常驻元素带 role=dialog」会让 ① 永久成立 → Delete 键彻底失效（本守卫的最大误伤风险）。
+const kb = await loadPure("src/lib/keyboard.ts");
+const { shouldIgnoreDeleteKey } = kb;
+
+check("shouldIgnoreDeleteKey：弹层打开 + 焦点在按钮 → 忽略（本次修复核心不变量）", () => {
+  eq(shouldIgnoreDeleteKey("BUTTON", true), true, "确认框 / 添加 / 设置弹层打开时 Delete 必须失效");
+});
+
+check("shouldIgnoreDeleteKey：弹层关闭 + 焦点在按钮 → 不忽略（正常删除仍可用）", () => {
+  eq(shouldIgnoreDeleteKey("BUTTON", false), false, "弹层未打开时按钮上按 Delete 应生效");
+});
+
+check("shouldIgnoreDeleteKey：弹层关闭 + INPUT / TEXTAREA → 忽略（打字不得触发删除）", () => {
+  eq(shouldIgnoreDeleteKey("INPUT", false), true);
+  eq(shouldIgnoreDeleteKey("TEXTAREA", false), true);
+});
+
+check("shouldIgnoreDeleteKey：弹层关闭 + 焦点在 body（targetTag 为 null）→ 不忽略", () => {
+  eq(shouldIgnoreDeleteKey(null, false), false, "焦点在 body 上时 Delete 应生效");
+});
+
+check("shouldIgnoreDeleteKey 属性：dialogOpen=true 时对任意元素一律忽略", () => {
+  for (const tag of ["BUTTON", "INPUT", "TEXTAREA", "SELECT", "DIV", "TABLE", "A", "SPAN"]) {
+    eq(shouldIgnoreDeleteKey(tag, true), true, `弹层打开时 ${tag} 上的 Delete 必须被忽略`);
+  }
+  eq(shouldIgnoreDeleteKey(null, true), true, "弹层打开且无焦点元素时也必须忽略");
+});
+
+check("shouldIgnoreDeleteKey 属性：dialogOpen=false 时仅 INPUT / TEXTAREA 忽略", () => {
+  for (const tag of ["BUTTON", "SELECT", "DIV", "TABLE", "BODY", "A", "SPAN", "LABEL"]) {
+    eq(shouldIgnoreDeleteKey(tag, false), false, `弹层关闭时 ${tag} 上的 Delete 应生效`);
+  }
+  eq(shouldIgnoreDeleteKey("INPUT", false), true);
+  eq(shouldIgnoreDeleteKey("TEXTAREA", false), true);
+  eq(shouldIgnoreDeleteKey(null, false), false);
+});
+
+check("shouldIgnoreDeleteKey：弹层打开优先级高于输入框判定（INPUT / TEXTAREA + open → 忽略）", () => {
+  eq(shouldIgnoreDeleteKey("INPUT", true), true);
+  eq(shouldIgnoreDeleteKey("TEXTAREA", true), true);
+});
+
+check("shouldIgnoreDeleteKey 返回值恒为布尔（不返回 undefined / 真值）", () => {
+  for (const tag of [null, "INPUT", "TEXTAREA", "BUTTON"]) {
+    for (const open of [true, false]) {
+      const r = shouldIgnoreDeleteKey(tag, open);
+      if (typeof r !== "boolean") throw new Error(`(${tag}, ${open}) 应返回 boolean，实际 ${typeof r}`);
+    }
+  }
+});
+
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {
