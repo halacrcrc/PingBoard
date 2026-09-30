@@ -213,6 +213,19 @@ const App: React.FC = () => {
       .getState()
       .then(handleSnapshot)
       .catch((e) => showToast(`初始化失败：${String(e)}`));
+    // 启动期一次性提示（配置损坏 / 已备份原文件 / 抢救结果）：
+    // 后端读走即清空，所以这里不需要做任何去重；没提示时后端返回 null。
+    // 文案含完整的备份文件路径，20 秒才够用户看清并记下（默认 4 秒会被 truncate 吃掉路径）。
+    api
+      .takeStartupNotice()
+      .then((n) => {
+        if (n) showToast(n, 20_000);
+      })
+      .catch((e) => {
+        // 不能静默吞掉：命令没注册 / 改签名时前端会走到这里，
+        // 静默忽略会让整条提示链路无声失效，而用户毫不知情。
+        console.error("[pingboard] 启动提示获取失败：", e);
+      });
     return () => {
       disposed = true;
       const u = unlistenRef.current;
@@ -298,9 +311,10 @@ const App: React.FC = () => {
 
   /* ------------------------- 提示条 ------------------------- */
 
-  const showToast = React.useCallback((msg: string) => {
+  // 时长可传参：启动期提示含备份文件完整路径，需要更长的停留时间（默认仍为 4 秒）
+  const showToast = React.useCallback((msg: string, ms = 4000) => {
     setToast(msg);
-    window.setTimeout(() => setToast(null), 4000);
+    window.setTimeout(() => setToast(null), ms);
   }, []);
 
   /* ------------------------- 操作封装 ------------------------- */
@@ -739,8 +753,9 @@ const App: React.FC = () => {
         onCancel={() => setConfirmDelete(false)}
       />
 
+      {/* 不截断、允许换行：提示里含备份文件完整路径，被 ellipsis 吃掉的恰好是手工恢复的唯一凭据 */}
       {toast && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded shadow-lg bg-slate-800 text-white text-[12px] max-w-[80vw] truncate">
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded shadow-lg bg-slate-800 text-white text-[12px] max-w-[80vw] whitespace-pre-wrap break-words">
           {toast}
         </div>
       )}

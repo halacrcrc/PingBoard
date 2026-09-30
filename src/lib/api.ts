@@ -81,3 +81,10 @@ export const setTargetEvents = (id: number, eventsOn: boolean): Promise<void> =>
 /** 枚举系统已安装字体族名（后端读注册表，去重排序；失败时返回空数组由调用方兜底） */
 export const listSystemFonts = (): Promise<string[]> =>
   invoke<string[]>("list_system_fonts");
+
+/**
+ * 取走启动期一次性提示（配置损坏 / 已备份 / 抢救结果）。
+ * 后端读走即清空，所以前端**不需要**自己做去重；无提示时返回 null。
+ */
+export const takeStartupNotice = (): Promise<string | null> =>
+  invoke<string | null>("take_startup_notice");

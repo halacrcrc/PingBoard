@@ -67,6 +67,8 @@ pub struct Inner {
     events: events::EventStore,
     /// 事件默认目录（app_config_dir；由 setup 注入）
     events_base_dir: Mutex<Option<PathBuf>>,
+    /// 启动期一次性提示（配置损坏 / 备份 / 抢救结果），由前端取走展示后清空
+    config_notice: RwLock<Option<String>>,
 }
 
 /// 应用状态（由 Tauri manage）
@@ -87,18 +89,62 @@ impl AppState {
                 icmp_failed: AtomicBool::new(false),
                 events: events::EventStore::new(),
                 events_base_dir: Mutex::new(None),
+                config_notice: RwLock::new(None),
             }),
         }
     }
 
+    /// 注入启动期提示（配置损坏时由 setup 调用；正常启动传 None）
+    pub fn set_config_notice(&self, notice: Option<String>) {
+        *self.inner.config_notice.write().unwrap() = notice;
+    }
+
+    /// 取走启动期提示（**读走即清空**，天然只展示一次）。
+    ///
+    /// ⚠️ 之所以不塞进 `Snapshot`：快照有 3 个消费者（`get_state` / 500ms 发射器 /
+    /// 导出取数），one-shot 的提示会被竞争消费者吞掉，且发射器启动早于前端 mount。
+    /// 独立命令只有一个消费者，语义自解释。
+    pub fn take_config_notice(&self) -> Option<String> {
+        self.inner.config_notice.write().unwrap().take()
+    }
+
     /* ----------------------------- 读取 ----------------------------- */
 
+    /// 只取主机列表（**纯读，无副作用**）
+    ///
+    /// 只要主机列表的调用方（如导出报表）必须走本函数，**不要**走 `snapshot()`：
+    /// `snapshot()` 会顺手 `drain_pending()`，被无关调用方调一次就会静默吃掉
+    /// 前端尚未消费的事件增量。
+    pub fn target_states(&self) -> Vec<TargetState> {
+        let list = self.inner.targets.lock().unwrap();
+        list.iter().map(|t| t.lock().unwrap().clone()).collect()
+    }
+
+    /// 导出报表用的主机列表（`ids` 为 None 表示全部）
+    ///
+    /// ⚠️ 走的是无副作用的 `target_states()`，**绝不能**换成 `snapshot()`：
+    /// 后者会 `drain_pending()`，用户导出一次报表就会吃掉前端尚未消费的事件增量。
+    ///
+    /// 放在 state.rs 而非命令里的原因同 `config::load_from_path`：
+    /// 让**生产取数路径本身**能被单测覆盖，命令只做一层薄封装。
+    pub fn export_targets(&self, ids: Option<&[u64]>) -> Vec<TargetState> {
+        match ids {
+            Some(list) => self
+                .target_states()
+                .into_iter()
+                .filter(|t| list.contains(&t.id))
+                .collect(),
+            None => self.target_states(),
+        }
+    }
+
     /// 生成一份聚合快照
+    ///
+    /// ⚠️ 本函数是**带副作用的 getter**：`events` 字段取自 `drain_pending()`，
+    /// 每调用一次就清空一次待推送增量。只有 500ms 快照发射线程才应消费它；
+    /// 仅需要主机列表的调用方请改用 `target_states()`。
     pub fn snapshot(&self) -> Snapshot {
-        let targets: Vec<TargetState> = {
-            let list = self.inner.targets.lock().unwrap();
-            list.iter().map(|t| t.lock().unwrap().clone()).collect()
-        };
+        let targets = self.target_states();
 
         let total_sent: u64 = targets.iter().map(|t| t.sent).sum();
         let total_received: u64 = targets.iter().map(|t| t.received).sum();
@@ -1375,6 +1421,61 @@ mod tests {
         assert!(
             !snap2.events.iter().any(|e| e.kind == EventKind::ConfigChange),
             "无变化不应产生 config_change"
+        );
+    }
+
+    /// 启动期提示必须是**一次性**的：`take_config_notice` 读走即清空，
+    /// 第二次调用应为 None（否则前端会反复弹同一个 toast）。
+    #[test]
+    fn qa_config_notice_is_one_shot() {
+        let st = AppState::new();
+        assert!(st.take_config_notice().is_none(), "未注入时不应有提示");
+
+        st.set_config_notice(Some("配置损坏".to_string()));
+        assert_eq!(st.take_config_notice().as_deref(), Some("配置损坏"));
+        assert!(
+            st.take_config_notice().is_none(),
+            "读走后必须清空，不得重复展示"
+        );
+
+        // 注入 None（正常启动）不应留下任何提示
+        st.set_config_notice(None);
+        assert!(st.take_config_notice().is_none());
+    }
+
+    /// 导出报表取数**不得**吃掉待推送的事件增量（存量缺陷：`snapshot()` 是带副作用的 getter）。
+    ///
+    /// 场景：用户攒下一批待推送事件后点「导出报表」→ 前端下一帧 ping-snapshot 少一批增量。
+    /// 本测试锁的是「导出用的取数函数必须是纯读」这一结构事实。
+    ///
+    /// ⚠️ 先红后绿：落地前 `export_report` 走 `snapshot()`（会 drain），本测试必须为红；
+    /// 落地后改走无副作用的 `target_states()` 才转绿。若一上来就是绿的，说明锁错了对象。
+    #[test]
+    fn qa_export_taking_targets_must_not_consume_pending_events() {
+        let st = AppState::new();
+        st.init_from_config(&build_cfg(vec![("orig", "127.0.0.1")], false, 256, 200));
+        let id = st.snapshot().targets[0].id; // 取 id（此时 pending 为空）
+
+        // 攒下 2 条待推送增量：改备注名两次，每次产生一条 config_change
+        st.update_target(id, "改名-1".to_string(), "127.0.0.1".to_string(), true)
+            .unwrap();
+        st.update_target(id, "改名-2".to_string(), "127.0.0.1".to_string(), true)
+            .unwrap();
+
+        // 导出报表实际使用的取数路径（生产函数本身，命令只做薄封装）
+        let targets = st.export_targets(None);
+        assert_eq!(targets.len(), 1, "导出取数必须能拿到主机列表");
+        // 指定 id 的分支同样不得有副作用
+        let picked = st.export_targets(Some(&[id]));
+        assert_eq!(picked.len(), 1, "按 id 过滤必须命中");
+
+        // 关键断言：取数之后，待推送增量必须原封不动
+        let remaining = st.inner.events.drain_pending();
+        assert_eq!(
+            remaining.len(),
+            2,
+            "导出取数不得吃掉待推送的事件增量（实际只剩 {} 条）",
+            remaining.len()
         );
     }
 

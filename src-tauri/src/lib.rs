@@ -36,15 +36,18 @@ pub fn run() {
             commands::export_events,
             commands::set_target_events,
             commands::list_system_fonts,
+            commands::take_startup_notice,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             // 1) 读取配置并初始化状态（失败不阻塞启动）
-            let cfg = config::load(&handle);
+            let (cfg, notice) = config::load(&handle);
             {
                 let st = app.state::<state::AppState>();
                 st.init_from_config(&cfg);
+                // 配置损坏 / 抢救过的提示交给前端展示（release 无控制台，eprintln 看不见）
+                st.set_config_notice(notice);
             }
 
             // 1.1) 事件日志：注入默认目录、应用持久化配置并读回历史

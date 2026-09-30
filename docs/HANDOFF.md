@@ -16,8 +16,10 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 | 项 | 值 |
 |---|---|
 | 最新发布版本 | **v1.1.8**（tag `v1.1.8` → commit `bc2bdc9`） |
-| 当前 HEAD | `c4d9970`（`docs: 建立代码审查标准与流程`），**已推送 origin/main** |
-| 工作区 | 干净，与远端同步 |
+| 当前 HEAD | `b1a828b`（批次 1 修复），**已推送 origin/main** |
+| 工作区 | ⚠️ **有未提交改动**（批次 2 / 2b / 2c，9 文件 1281 增 / 63 删）。已同步两侧，**未 commit** |
+| Rust 测试 | `cargo test --lib` = **143 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
+| Tauri 命令数 | **19**（原 18，批次 2b 新增 `take_startup_notice`） |
 | 版本声明位置 | `package.json:4` 与 `src-tauri/tauri.conf.json:4`（**提版本要同时改这两处**，另需改 README） |
 | 平台 | **仅 Windows x64，最低 Windows 10**；自 v1.1.8 起随版发布 ARM64 实验包（**未经真机测试**） |
 | 唯一外部运行时依赖 | WebView2 Evergreen Runtime（**不需要** VC++ 运行库 / .NET / `WebView2Loader.dll`） |
@@ -50,7 +52,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 1. **ICMP 只能用 Win32 IP Helper `IcmpSendEcho`**（`windows` 0.61）。禁 raw socket / surge-ping。
    注意 `pinger/icmp.rs` 无 `cfg(windows)` 门控 → **代码库不可跨平台编译**。
 2. 所有 spawn 子进程必须带 `CREATE_NO_WINDOW (0x0800_0000)`（全仓唯一处在 `pinger/fallback.rs:21/63`）。
-3. **契约**：18 个 Tauri 命令（注册清单 `src-tauri/src/lib.rs:20-39`）+ 事件 `ping-snapshot`（500ms 聚合推送，前端整体替换状态）。
+3. **契约**：19 个 Tauri 命令（注册清单 `src-tauri/src/lib.rs:20-40`）+ 事件 `ping-snapshot`（500ms 聚合推送，前端整体替换状态）。
 4. `Status` serde 必须 lowercase：`idle/resolving/ok/timeout/failed`。
 5. **配色语义 绿 = 正常、红 = 失败**（是监控语义，**不要**套股票涨红跌绿）。改徽标/按钮底色观感前**必须先问用户**。
 6. **禁用 `window.confirm` / `window.alert`**（Tauri WebView 不可靠）→ 一律自绘 `ConfirmDialog`。
@@ -64,19 +66,74 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 **来源**：`qa-artifacts/review-2026-09-29/baseline-review.md`（2026-09-29 基线复审，5 🔴 / 25 🟡 / 16 💭）。
 v1.1.8 **不需要回滚**，但 🔴 应在 **v1.1.9 全部清零**。
 
-| # | 问题 | 位置 | 成本 |
-|---|---|---|---|
-| 🔴1 | `add_targets` 用 `let _ = save_config(&app)` 吞掉保存失败（同文件另 5 个命令都是 `?`）→ 导入后不落盘，下次保存被空配置覆盖 | `src-tauri/src/commands.rs:23` | 改一个字符 |
-| 🔴2 | 弹层打开时按 Delete 静默删除选中目标并落盘（无确认无撤销）。⚠️ 配套：`AddTargetsDialog.tsx:323` / `SettingsDialog.tsx:298` 弹窗容器**没有 `role="dialog"`** | `src/App.tsx:439-450` + `418-436` | ~30 min |
-| 🔴3 | 配置反序列化容错不完整：4 个结构体字段缺字段级 `#[serde(default)]`；**15 个设置字段只有 2 个有类型容错** → 任一字段类型不符即丢全部主机。⚠️ 修时必须同步改掉 `model.rs:381` 那条把错误行为锁成「既定策略」的测试 | `src-tauri/src/model.rs:227-249`、`102-151` | ~2 h |
-| 🔴4 | 配置解析失败直接回落默认且**不备份** → 原文件随后被空配置覆盖。需补「备份 corrupt-时间戳 + 抢救 targets」，但**保持不阻塞启动** | `src-tauri/src/config.rs:35-44` | ~1 h |
-| 🔴5 | 同上（🔴3+4 是同一条故障链，必须一起修） | — | — |
+### 5.1 进度总览
+
+| 批次 | 内容 | 状态 |
+|---|---|---|
+| **批次 1** | 原 🔴1 `add_targets` 吞保存失败 + 原 🔴2 Delete 键穿透弹层 | ✅ **已完成并推送** `b1a828b`（6 文件 +114/−9），测试 49→57 |
+| **批次 2** | 原 🔴3+🔴4+🔴5（R1 主线：A2 结构体默认值 / A3 字段类型容错 / A4 备份+抢救） | ⚠️ **已实施、未提交**。复审又查出 2 条新 🔴 → 见 5.2 |
+| **批次 2b** | 🔴-1 `TargetConfig` 四字段容错 + settings 抢救 + 🔴-2 抢救可观测（跨端） | ✅ **已实施、未提交**。复审 **0 🔴 / 3 🟡** |
+| **批次 2c** | 清 2b 的 4 条 🟡（字符串布尔语义 / toast 装不下路径 / `.catch` 静默吞错 / 提示分级） | ✅ **已实施、未提交**。143 测试全绿，`tsc` 0 error |
+| 批次 3 | 测试基建 + 让测试真正能失败（`package.json` 加 test 脚本、`decideAdd()` / `compare()` / `consumeEvents()` 抽纯函数） | ⏳ 未开始 |
+| 批次 4 | 行为类 🟡（B1 事件被旁路消费 / B2 清空未清 pending / B3 幽灵 worker / B9 删目标不清事件等） | ⏳ 未开始 |
+
+### 5.2 批次 2 系列：销项状态（**代码侧已全部做完，仅剩实机验证**）
+
+批次 2 / 2b / 2c 全部落盘，**两侧已同步，未 commit**。`cargo test --lib` 143 全绿、`tsc --noEmit` 0 error。
+架构师终审：**0 🔴**，并判定「代码侧的 R1 主线已经做完，质量高于基线」。
+
+| # | 问题 | 状态 |
+|---|---|---|
+| **A2/A3/A4** | 结构体字段级 default + 16 字段类型容错 + 损坏时备份抢救 | ✅ 已销 |
+| **🔴-1** | `TargetConfig` 四字段无类型容错（`"enabled": true` 手改成 `"true"` → 该主机被静默丢弃） | ✅ **已销**（`tolerant_string!` 两臂宏 + `tolerant_bool!`；host 保形、Bool 退化） |
+| **🔴-2** | 抢救/备份在 release 下不可见（`windows_subsystem = "windows"` 使 `eprintln!` 全丢弃） | ✅ **已销**（独立命令 `take_startup_notice` + 前端 toast，文案带备份完整路径） |
+| 🟡-1 | `load` 与 `parse_with_recovery` 两份手抄实现，7 个测试锁错对象 | ✅ 已销（`load` → `load_from_path` → `parse_with_recovery` 三级委派） |
+| 🟡 字符串布尔 | `"enabled": "false"` 回落成 **true**（用户想关的主机反被打开） | ✅ 已销（`tolerant_bool!` 加字符串臂） |
+| 🟡 toast | 单行 `truncate` + 4 秒，备份路径被省略号吃掉 | ✅ 已销（时长可传参 20s + `whitespace-pre-wrap break-words`） |
+| 🟡 静默吞错 | 命令漏注册时整条链路静默失效（QA 变异实测：删掉注册 → 141 全绿） | ✅ 已降级（`.catch` 改 `console.error` 留痕） |
+| 🟡 提示分级 | 抢救回 0 台是最严重情况，措辞却与抢救回 N 台相同 | ✅ 已销（n==0 用强警告，含「在此之前请勿退出本程序」） |
+
+**🔴-2 的实际做法**（与原设想不同，记录备查）：没有塞进 `Snapshot` 字段，而是**新增第 19 个命令** `take_startup_notice`。
+理由：`snapshot()` 有 3 个调用方（`get_state` / 500ms 发射器 / 导出），one-shot notice 会被竞争消费者吞掉，且发射器启动早于前端 mount。
+链路：`config::load` 返回 `(AppConfig, Option<String>)` → `state.rs` 的 `config_notice: RwLock<Option<String>>` + `take_config_notice()`（`take()` 读走即清空）→ 命令 → `api.ts:89` → `App.tsx` 在 `getState()` 之后调一次。
+
+### ⚠️ 5.2.1 一条必须记住的承重点（改动前必读）
+
+**`AppConfig.targets` 不要加 `deserialize_with` 容错，也不要在抢救里把非对象元素「静默跳过」。**
+经过全字段容错后，「targets 数组里出现非对象元素」（裸字符串 / `null` / 数字）是**唯一**还能让整份配置解析失败、从而触发备份+提示的形态。
+**这条窄路现在是承重结构** —— 谁顺手堵上它，整份配置就永远解析成功 → 备份与提示的触发器消失 → 原文件在退出时被静默覆盖，**比现在更糟**，而且所有测试依然全绿（测试验的是解析成功，不是验「有没有触发备份」）。
+理想形态是**解耦**（启动时无条件留滚动备份 + 只要发生过任何丢弃/降级就发 notice），属未来改进方向。
+
+### 5.2.2 R1 闭合判据（架构师给，4 条全满足才签字）
+
+| # | 判据 | 状态 |
+|---|---|---|
+| 1 | 🔴-1 修复 + 配套哨兵测试（坏值不得让邻座主机消失、不得连带丢 settings） | ✅ 满足 |
+| 2 | 🔴-2 notice 通道打通且**用户真的读得到** | ✅ 满足（2c 修复 toast 后才真正满足） |
+| 3 | 🟡-1 `load` 与 `parse_with_recovery` 合一，回滚抢救逻辑测试变红 | ✅ 满足 |
+| 4 | **人工 QA：真实旧配置文件端到端实测** | ❌ **未执行 —— 发布前必须补** |
+
+**判据 4 的可执行步骤**（详见 `docs/HANDOFF.md` 历史版本或架构师报告 §3）：
+1. 配置路径 `C:\Users\<用户名>\AppData\Roaming\com.pingboard.desktop\pingboard-config.json`，**先复制一份到桌面当还原点**。
+2. 用一份 v1.1.0 旧配置（或构造只含早期字段的 JSON），把某台主机的 `"enabled": true` 改成 `"enabled": "yes"`。建议同时放一台 `"enabled": false` 的哨兵主机。
+3. 启动应用，四条判定：**① 3 行主机都在 ② 坏条目的 host 保形为 `223.5.5.5`（不是空）③ 双击可编辑且改完重启仍在 ④ 邻座「未启用」未被翻转，且不弹损坏提示**。
+4. 负向对照：`targets` 数组末尾加一个 `null` → 重启 → 应弹提示（含备份完整路径 + 抢救条数）、主机仍在、配置目录多出 `pingboard-config.corrupt-<时间戳>.json`。
+5. 还原：把还原点拷回去，删掉测试产生的 `corrupt-` 备份。
+
+### 5.3 其余已知待办（未开始）
 
 **已知「假测试」**：`tests/frontend_pure.test.mjs:343-351` 那条「单个添加绕过查重」回归测试，**把修复回滚后依然全绿**（测的是纯函数，坏的是接线）。修复方向是抽 `decideAdd()` 决策纯函数。
 **测试基建是空的**：`package.json` **没有 `test` 脚本**，所以审查清单里写的「npm test 通过」一直空转；`esbuild` 也未声明为 devDependency。
 
-**修复批次建议**：① 🔴1 + 🔴2（~40 min）→ ② 🔴3 + 🔴4（~3 h）→ ③ 测试基建 + 让测试真正能失败（~2 h）→ ④ 行为类 🟡。
-**验收要求**：每条修复都要配「回滚到旧写法就失败」的测试（`docs/code-review.md` §6）；R1 相关改动走**全量通道**（L1 自检 + L2 多轮至 🔴🟡 清零 + L3 发布前走查），并用一份 v1.1.0 时代的旧 `config.json` 实测升级不丢数据。
+**验收要求**：每条修复都要配「回滚到旧写法就失败」的测试（`docs/code-review.md` §6）；R1 相关改动走**全量通道**（L1 自检 + L2 多轮至 🔴🟡 清零 + L3 发布前走查）。
+
+### 5.4 本轮沉淀的方法论（改配置 / 写防护性代码时必用）
+
+1. **哨兵字段套路**：只断言「targets 不丢」的测试会**假绿**——因为 `deserialize_settings` 的整块兜底会掩盖单点失效。必须在同一个 settings 块里塞一个合法字段（如 `history_len: 333`）并断言它存活，才能测出「单点写坏连带丢同块其它设置」的真危害。
+2. **测试前提会随修复过期**：给字段加容错后，原本用它制造「配置损坏」的用例会失效（version 那次打挂 2 个、`{"enabled":"yes"}` 会打挂 3 个）。**加容错时先检查哪些测试在拿它当损坏触发器**。
+3. **「删掉它，哪个用例会红？」必须给实测输出**（QA 提出）：任何防护性改动都要回答这个问题，且是**实测的红色输出**，不能只靠推理。批次 2 的 🟡-1 与 drain 缺陷都不是「代码写错」，而是**正确行为没被任何用例盯着**——两次都是在测试全绿的情况下把怕的东西原样装回去、毫无反应。架构师的同一判断是「测试绿 ≠ 行为被锁住」。
+4. **变异必须打在被测行为本身上**（工程师 2c 踩到）：他第一次做字符串布尔的变异，打在 `Value::Bool` 臂上——测试**全绿**，因为字符串臂还在、行为根本没变。改打「把字符串臂退化成 fallback」才是真红。**变异检测到「绿」时，先怀疑变异打错了地方，再怀疑测试无效。**
+5. **抢救/损坏类用例必须带前提守卫**：`assert!(serde_json::from_str::<AppConfig>(text).is_err(), "前提：这段文本必须真的解析失败")`。没有它，一旦某字段被加上容错，「损坏」形态变合法，用例会**静默失效**而不是响亮失败。
 
 ---
 

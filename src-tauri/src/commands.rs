@@ -2,7 +2,7 @@
 use tauri::{AppHandle, State};
 
 use crate::events::LogEvent;
-use crate::model::{PingSettings, Snapshot, TargetEntry, TargetState};
+use crate::model::{PingSettings, Snapshot, TargetEntry};
 use crate::state::{AppState, StopReason};
 use crate::{config, export};
 
@@ -120,16 +120,22 @@ pub async fn export_report(
     format: String,
     ids: Option<Vec<u64>>,
 ) -> Result<(), String> {
-    let snapshot = state.snapshot();
-    let targets: Vec<TargetState> = match ids {
-        Some(list) => snapshot
-            .targets
-            .into_iter()
-            .filter(|t| list.contains(&t.id))
-            .collect(),
-        None => snapshot.targets,
-    };
+    // ⚠️ 只取主机列表，必须走无副作用的 `export_targets()`：
+    // `snapshot()` 会 drain_pending()，导出一次报表就会吃掉前端尚未消费的事件增量。
+    let targets = state.export_targets(ids.as_deref());
     export::write_report(&path, &format, &targets)
+}
+
+/// 取走启动期的一次性提示（配置损坏 / 已备份 / 抢救结果），**取走即清空**。
+///
+/// ⚠️ 不放在 `Snapshot` 里的原因见 `AppState::take_config_notice`：
+/// 快照有多个消费者，one-shot 提示会被竞争消费者吞掉。本命令只有前端一个消费者。
+#[tauri::command]
+pub async fn take_startup_notice(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    // 无提示时返回 Ok(None)（前端据此不弹 toast）；只有真的拿不到状态锁才会 Err
+    Ok(state.take_config_notice())
 }
 
 /// 获取配置文件路径
