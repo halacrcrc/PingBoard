@@ -1,6 +1,6 @@
 # PingBoard 交接文档
 
-> 版本：v1.1.8 · 最后更新 2026-09-29 · 面向「新会话 / 新 agent 接手」
+> 版本：v1.1.9-dev · 最后更新 2026-10-02 · 面向「新会话 / 新 agent 接手」
 > 本文是**接手时的第一个读点**，只做状态交代与索引。细节一律引用专题文档，不在此重复。
 
 ---
@@ -16,11 +16,12 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 | 项 | 值 |
 |---|---|
 | 最新发布版本 | **v1.1.8**（tag `v1.1.8` → commit `bc2bdc9`） |
-| 当前 HEAD | `b1a828b`（批次 1 修复），**已推送 origin/main** |
-| 工作区 | ✅ **干净**，与 `origin/main` 同步（HEAD `59f22d5`） |
-| Rust 测试 | `cargo test --lib` = **143 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
-| Tauri 命令数 | **19**（原 18，批次 2b 新增 `take_startup_notice`） |
-| 版本声明位置 | `package.json:4` 与 `src-tauri/tauri.conf.json:4`（**提版本要同时改这两处**，另需改 README） |
+| 当前开发版本 | 🟡 **v1.1.9-dev**（批次 5 报表导出筛选）—— 四处版本号已改 `1.1.9`，**尚未提交、未发版** |
+| 当前 HEAD（仓库侧） | `2bf9a1d`，工作区有本批次的 9 改 + 3 新（未提交） |
+| Rust 测试 | `cargo test --lib` = **154 passed / 0 failed**（143 基线 + 批次 5 的 11 条）；`npx tsc --noEmit` = 0 error；`npm test` = 90 passed |
+| Tauri 命令数 | **19**（原 18，批次 2b 新增 `take_startup_notice`）—— 批次 5 只给 `export_report` **加参数**，未新增命令 |
+| 版本声明位置 | **四处**：`package.json:4`、`src-tauri/tauri.conf.json:4`、`src-tauri/Cargo.toml:3`、`src-tauri/Cargo.lock`（`name = "pingboard"` 段下一行）。**漏 `Cargo.lock` 会「装完还是旧版本号」**；另需改 README |
+| 🩸 本环境 cargo 限制 | 沙箱拦 **rustup shim**（`C:\Users\22534\.cargo\bin\cargo.exe`）。改用工具链真 cargo：<br>`$env:PATH = "C:\Users\22534\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;" + $env:PATH`<br>（`node`/`npm`/`npx tsc` 不受影响） |
 | 平台 | **仅 Windows x64，最低 Windows 10**；自 v1.1.8 起随版发布 ARM64 实验包（**未经真机测试**） |
 | 唯一外部运行时依赖 | WebView2 Evergreen Runtime（**不需要** VC++ 运行库 / .NET / `WebView2Loader.dll`） |
 | 代码规模 | 约 9,300 行：Rust 11 模块（`state.rs` 1471、`events.rs` 1289 为最大） + 前端 15 文件（`App.tsx` 722） |
@@ -50,7 +51,8 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 - 安装包通过 **Release 附件**分发（见 `github-push-and-release` 技能），仓库只管源码。
 推历史包时用 `git add <具体路径>`，**永远不要在仓库根裸跑 `git add -A`**。
 
-`src-tauri/tauri.conf.json` **基线 md5 = `2c0a8cf0fb8d8f1d5eebea6679c8d270`（v1.1.8 起，两侧必须始终一致）**。
+`src-tauri/tauri.conf.json` **基线 md5 = `4048afd632b3cc649f5904b36727a69e`（v1.1.9 起，两侧必须始终一致）**。
+⚠️ **提版本后基线必然变化，必须重记并同步两侧**（v1.1.8 时期的旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。
 打包变体时只改**构建侧 D 盘**的 `webviewInstallMode`，构造完立刻还原。
 
 ---
@@ -82,8 +84,38 @@ v1.1.8 **不需要回滚**，但 🔴 应在 **v1.1.9 全部清零**。
 | **批次 2** | 原 🔴3+🔴4+🔴5（R1 主线：A2 结构体默认值 / A3 字段类型容错 / A4 备份+抢救） | ✅ **已推送** `59f22d5`。复审又查出 2 条新 🔴 → 见 5.2 |
 | **批次 2b** | 🔴-1 `TargetConfig` 四字段容错 + settings 抢救 + 🔴-2 抢救可观测（跨端） | ✅ **已推送** `59f22d5`。复审 **0 🔴 / 3 🟡** |
 | **批次 2c** | 清 2b 的 4 条 🟡（字符串布尔语义 / toast 装不下路径 / `.catch` 静默吞错 / 提示分级） | ✅ **已推送** `59f22d5`。143 测试全绿，`tsc` 0 error |
-| 批次 3 | 测试基建 + 让测试真正能失败（`package.json` 加 test 脚本、`decideAdd()` / `compare()` / `consumeEvents()` 抽纯函数） | ⏳ 未开始 |
+| 批次 3 | 测试基建 + 让测试真正能失败（`package.json` 加 test 脚本、`decideAdd()` / `compare()` / `consumeEvents()` 抽纯函数） | ✅ 已推送（前端测试 57→81） |
+| **批次 5（新）** | **报表导出筛选**：零丢包 / 全部未成功两种独立口径 | 🟢 **已落盘，前后端测试全绿**；待人工 QA + 发版（见 5.5） |
 | 批次 4 | 行为类 🟡（B1 事件被旁路消费 / B2 清空未清 pending / B3 幽灵 worker / B9 删目标不清事件等） | ⏳ 未开始 |
+
+### 5.5 批次 5：报表导出筛选（2026-10-02，v1.1.9-dev）
+
+**做了什么**：在 `export_report` 上加一个可选 `filter` 参数，支持只导出
+①**完全未丢包**（`sent>0 && failed==0`）②**全部 ping 未成功**（`sent>0 && received==0`）两类节点。
+工具栏「导出 ▾」新增第 3 组入口 → 打开 `ExportDialog`（范围 × 筛选口径 × 格式 正交排布 + 命中台数预览）。
+
+**详细设计见 `docs/export-filter-design.md`** —— 含 15 列字段表、判定表、兼容性逐条保证、变异验证记录。
+此处只记**接手必知的三条**：
+
+1. **筛选只改行集合，绝不改字段结构**：CSV 仍 15 列、HTML 仍 15 个 `<th>`。
+   `ExportFilter::All`（缺省/`null`/`""`）的产出与本功能上线前**逐字节一致**，
+   原有 6 条导出菜单路径与默认文件名 `pingboard-report.<ext>` 一字未改。
+2. **🩸 判据必须带 `sent > 0`**：`sent==0`（从未探测 / 已清空统计）时 `loss_pct` 被定义为 `0.0`，
+   只判 `failed==0` 会把未开始的主机全算成「零丢包」。**已用变异实测锁死**（把判据改回
+   `failed===0` → 前端测试 88/2，精确报出「未开始」被误判）。
+3. **判据在前端有两份实现**：`format.ts` 的 `matchesExportFilter`（只做预览计数）与
+   Rust `export::matches_filter`（写文件的唯一权威）。**改判据必须两侧同时改**，
+   两侧测试用逐台同构的四台样本互相锁定。
+
+**测试状态**：Rust `cargo test --lib` = **154 passed / 0 failed**（143 基线 + 新增 11）；
+前端 `npm test` = **90 passed / 0 failed**（81 + 新增 9）；`npx tsc --noEmit` 0 error。
+（实现期间沙箱拒绝运行 `cargo.exe`（`untrusted mount point`），`export.rs` 曾一度未经编译器验证，
+已在正常环境补跑通过 —— 遇到类似阻塞别误判成代码问题。）
+
+**⚠️ 剩余工作**：①~~**双位置同步**~~ ✅ **2026-10-02 已完成**（12 个文件：9 改 + 3 新，两侧哈希全部一致；
+新建文件带的 CRLF 已在 D 侧规范化，见 `MEMORY.md` 环境坑一节）；
+②人工 QA 两种口径的端到端导出（坑见 §5.2.2.1）；③发 v1.1.9 走 §4.4 全量走查；
+④**提交与推送**（git 传输层在本环境失效，需走 `push_via_api.py` 兜底）。
 
 ### 5.2 批次 2 系列：销项状态（**R1 已全闭合，4 条判据全满足**）
 
@@ -205,6 +237,7 @@ corrupt 备份已删，dev server 与 9333 端口已关，备份与截图在 `C:
 |---|---|
 | `docs/code-review.md` | **审查的唯一裁决依据**：三级分级（🔴/🟡/💭）、**14 条红线 R1–R14**、快速/标准/全量三通道、分语言检查清单、反模式速查、意见书写模板 |
 | `docs/events-log-design.md` | 事件日志设计稿（24 KB） |
+| `docs/export-filter-design.md` | **报表导出筛选**（零丢包 / 全部未成功）：判定标准、15 列字段结构、兼容性保证、变异验证记录 |
 | `docs/reviews/baseline-review-2026-09-29.md` | v1.1.8 基线复审（Rust + 前端 + 汇总） |
 
 ---

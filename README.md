@@ -15,10 +15,10 @@
 | 项目 | 要求 |
 |---|---|
 | 操作系统 | **Windows 10**（建议 1809 及以上）或 **Windows 11**。Windows Server 2016 / 2019 / 2022 理论可用（未实测） |
-| 系统架构 | **仅 64 位（x64）**。32 位系统无法安装，暂无 ARM64 原生版本 |
+| 系统架构 | **x64 为主**（32 位系统无法安装）；自 v1.1.8 起另提供 **ARM64 实验包**（原生 ARM64，**未经真机测试**，详见「安装」一节） |
 | 额外组件 | **仅需 Microsoft Edge WebView2 运行时**（Windows 11 已内置；Windows 10 多数已随 Edge 一起安装）。无需 VC++ 运行库、无需 .NET Framework、无需任何系统补丁 |
 | 权限 | 普通用户即可。安装到当前用户目录，运行与安装**均不触发 UAC** |
-| 磁盘占用 | 程序约 5.5 MB；WebView2 用户数据目录约 10 MB（随缓存缓慢增长） |
+| 磁盘占用 | 程序约 6.1 MB（`pingboard.exe` 6,447,616 B）；WebView2 用户数据目录约 10 MB（随缓存缓慢增长） |
 | 网络 | 探测依赖 ICMP 回显（IPv4），需本机出站策略与目标主机放行 ping |
 
 > **不支持 Windows 7 / 8.1**：WebView2 运行时自 109 版起已停止支持这两个系统。
@@ -43,15 +43,15 @@
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.1.8_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.8_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.1.8_arm64-setup.exe`（**ARM64 实验版**） | ≈ 2.0 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
+| `PingBoard_1.1.9_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.9_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.9_arm64-setup.exe`（**ARM64 实验版**） | ≈ 2.0 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
 
 > ⚠️ **ARM64 包未经真机测试**（开发机为 x64，无法运行 ARM64 程序验证；仅验证了编译通过与
 > PE 机器类型正确）。ARM64 Windows 设备**不装它也能用**：x64 包可通过 Windows 自带模拟运行。
 > 安装程序本体为 x86 属正常现象（ARM 机器靠系统模拟运行安装器，装出的应用才是原生 ARM64）。
 
-> v1.1.8 三种包**均已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
+> v1.1.9 三种包随本版发布，发布后可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
 > 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
 > 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
@@ -74,8 +74,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.1.8_x64-setup.exe /S                     :: 安装到默认目录
-PingBoard_1.1.8_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.1.9_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.9_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                     :: 静默卸载
 ```
 
@@ -98,7 +98,7 @@ uninstall.exe /S                                     :: 静默卸载
   关闭后不再按该值拦截，仅保留 **4096** 硬保护；详见「设置项」中的性能影响说明。
 
 ### 界面
-- 顶部工具栏：添加主机、开始/停止全部、清空统计、**清空列表**、设置、导出（CSV / TXT / HTML）、搜索、主题切换、状态指示灯。
+- 顶部工具栏：添加主机、开始/停止全部、清空统计、**清空列表**、设置、导出（CSV / TXT / HTML / **按结果筛选**）、搜索、主题切换、状态指示灯。
 - 选中目标后工具栏额外出现：**开始选中 / 停止选中 / 删除选中**（可对列表内的部分目标单独启停）。
 - 中部主表格：选择 / 备注名 / 主机名 / IP 地址 / 状态 / 延迟 / 平均 / 最小 / 最大 /
   丢包率 / 成功·失败 / 趋势 sparkline / 最后成功时间（共 **13 列**）。支持点击表头排序、多选（`Ctrl` / `Shift` + 复选框）、
@@ -111,6 +111,36 @@ uninstall.exe /S                                     :: 静默卸载
 - 行着色约定：**绿 = 正常，红 = 失败**。
 - 状态文字配色：**「运行中」为绿色（`emerald-600`）**、**「已停止」为灰色（`slate-400`）**，
   在工具栏、底部状态栏、详情面板「线程」三处一致。
+
+### 报表导出
+
+工具栏「导出 ▾」提供两组入口：**直接导出**（全部 / 仅选中 × CSV / TXT / HTML）与
+**按结果筛选**（打开「导出报表」对话框）。三种格式的**字段结构完全一致**，筛选只改变导出的行集合。
+
+**CSV 字段（固定 15 列，带 UTF-8 BOM，Excel 直接打开中文不乱码）**
+
+```
+序号,备注名,主机名,IP地址,状态,发送,接收,失败,丢包率(%),
+最小延迟(ms),平均延迟(ms),最大延迟(ms),最近延迟(ms),TTL,最后成功时间(UTC)
+```
+
+TXT 为无表头定宽文本；HTML 为单表格（同样 15 列）。后两者在汇总区会给出总发包 / 总收包 / 总丢包 / 总丢包率，
+带筛选时还会注明本次的筛选口径。
+
+**按结果筛选（v1.1.9 新增）**
+
+| 口径 | 判定 |
+|---|---|
+| **零丢包** | 已实际发过包（`sent > 0`）且**一次都没丢包**（`failed = 0`） |
+| **全部未成功** | 已实际发过包（`sent > 0`）且**所有 ping 一次都没成功**（`received = 0`） |
+
+- 两种口径**互相独立**，可分别导出；在 `sent > 0` 的前提下二者互斥，不会重复导出同一台。
+- 🩸 「**未开始探测**」或「**统计已清空**」的主机（`sent = 0`）**不会**被算进「零丢包」，
+  尽管此时丢包率显示为 0 —— 因为它根本没发生过任何一次 ping。
+- 「序号」在筛选后从 1 重新连续编号；0 命中时仍写出结构合法的文件（表头完整、0 数据行）。
+- 不筛选时产出的文件与本功能之前**逐字节一致**，既有 Excel 模板与解析脚本无需改动。
+
+> 更完整的字段表、判定表与兼容性逐条保证见 `docs/export-filter-design.md`。
 
 ### 事件日志（可用性流水账）
 详情面板底部的「最近日志」记录每台主机的**状态翻转**事件。它与上方折线图分工不同：
@@ -169,8 +199,8 @@ Excel 直接打开中文不乱码。
 ### 设置项
 | 设置 | 默认值 | 范围 |
 |---|---|---|
-| `interval_ms` 探测间隔 | 1000 | ≥100 |
-| `timeout_ms` 超时时间 | 2000 | ≥100 |
+| `interval_ms` 探测间隔 | 1000 | 100..600000 |
+| `timeout_ms` 超时时间 | 2000 | 100..60000 |
 | `payload_size` 负载大小 | 32 | 0..65500 |
 | `ttl` | 128 | 1..255 |
 | `max_threads` 最大线程数 | 256 | 1..1024 |
@@ -182,7 +212,9 @@ Excel 直接打开中文不乱码。
 | `events_level` 事件等级 | standard（标准） | fault / standard / detail |
 | `events_persist` 事件保存到文件 | true | 开关 |
 | `events_dir` 事件保存目录 | 空 = `%APPDATA%\com.pingboard.desktop\` | 任意可写目录 |
-| `events_keep` 每主机保留条数 | 200 | 50 / 200 / 1000 |
+| `events_keep` 每主机保留条数 | 200 | 50 / 200 / 1000（其余值归一为 200） |
+| `ui_scale` 界面缩放 | 100（不缩放） | 50..200 |
+| `ui_font_family` 界面字体 | 空 = 系统默认 | 本机已安装字体族名 |
 
 > **并发与性能影响**：每台主机会占用 1 个系统线程 + 1 个 ICMP 句柄。开启上限时按「最大线程数」拦截，
 > 可防止误加大量主机拖慢系统；关闭后不再限制（仅保留 4096 硬保护）——200 台以内影响很小，
@@ -196,9 +228,23 @@ Excel 直接打开中文不乱码。
 - 结构：`{ version, settings, targets: [{ name, host, enabled, events_on }] }`
 - 读取失败/文件缺失一律回退默认值，不 panic、不阻塞启动。
 - 保存时机：目标增删改、设置变更、应用退出前。
-- **新增字段一律带 serde 默认值**：旧版本配置缺字段时取默认值，**不会因单个字段缺失导致整份配置回落、
-  丢失已保存的主机列表**；`events_level` 遇到无法识别的值降级为「标准」而非报错。
 - 事件日志单独落盘在 `pingboard-events.jsonl`，与配置文件互不影响（见上文「事件日志」）。
+
+**配置韧性（v1.1.9 起）** —— 配置是**唯一记录你主机列表的地方**，因此做了三层保护：
+
+1. **单个字段值类型不对，只降级该字段。** 例如 `"enabled": "yes"`（手改时忘了去掉引号）、
+   `enabled: 1`（写成数字）都会被容错成合法值，**不会牵连整份配置**；
+   邻座主机的 `enabled: false` 也不会被连带翻转成开启。
+2. **新增字段一律带 serde 默认值。** 旧版本配置缺字段时取默认值，不会因缺字段导致整份配置回落。
+   枚举字段（`events_level`）遇到无法识别的值降级为「标准」而非报错。
+3. **真的整份解析失败时：先备份，再抢救，最后明确告知。**
+   - 原文件先完整备份为 `pingboard-config.corrupt-<时间戳>.json`（内容与原文一致，可手工恢复）；
+   - 再从损坏文件里逐条抢救仍能读出的主机；
+   - 界面弹出提示，**带完整备份路径与抢救台数**；一条都救不回来时用强警告措辞，
+     并明确提示「在此之前请勿退出本程序」（此时程序内存里用的是抢救后的配置，退出即被覆盖）。
+
+> 💡 **升级到 v1.1.9 不会丢主机列表**，无需任何配置迁移。
+> 若你之前遇到过「一启动主机全没了」，那正是本版修掉的问题。
 
 ---
 
@@ -230,8 +276,17 @@ npm run build
 ```bash
 cd src-tauri
 cargo check
-cargo test
+cargo test --lib        # 154 项（v1.1.9）
 ```
+
+### 前端纯函数测试
+
+```bash
+npm test                 # 90 项（v1.1.9）
+```
+
+> 用 esbuild 把真实 TSX/TS 转译后加载，把 React / Tauri 等运行时打桩为空模块，
+> 因此**无需浏览器或 WebView** 即可运行。
 
 ### 更换图标
 
@@ -265,7 +320,7 @@ npx tauri icon docs/app-icon.png
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.8_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.9_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
@@ -304,39 +359,50 @@ npx tauri build --bundles nsis
 
 ```
 pinginfo/
-├─ README.md
-├─ package.json / vite.config.ts / tsconfig.json / tsconfig.node.json
+├─ README.md / LICENSE
+├─ package.json / package-lock.json / vite.config.ts
+├─ tsconfig.json / tsconfig.node.json
 ├─ tailwind.config.js / postcss.config.js / index.html
-├─ docs/                         # 设计源与文档图
+├─ docs/                         # 设计源、文档与截图
 │  ├─ app-icon.svg               # 应用图标矢量源（在用）
 │  ├─ app-icon.png               # 1024x1024 透明渲染图
 │  ├─ app-icon-sizes.png         # 各尺寸放大对照（16/24/32/48/64）
 │  ├─ app-icon-alt-white.svg/.png# 白底备选版
-│  └─ screenshot.png             # 界面截图
+│  ├─ screenshot.png             # 界面截图
+│  ├─ HANDOFF.md                 # 交接文档（接手时第一个读点）
+│  ├─ code-review.md             # 代码审查标准：三级分级 + R1–R14 红线
+│  ├─ events-log-design.md       # 事件日志设计稿
+│  ├─ export-filter-design.md    # 导出筛选设计（判定标准 / 字段表 / 兼容性）
+│  ├─ release-notes-1.1.9.md     # v1.1.9 与 v1.1.8 的完整差异
+│  └─ reviews/                   # 历次基线复审报告
 ├─ scripts/gen-icon.mjs          # v1.0.0 时期的占位图标脚本（已被 docs/app-icon.svg 流程取代）
 ├─ assets/app-icon.png           # 同上，历史遗留
 ├─ src/                          # 前端（React + TS）
 │  ├─ main.tsx / App.tsx / styles.css / types.ts
 │  ├─ lib/api.ts                 # invoke 封装
-│  ├─ lib/format.ts              # 格式化工具
+│  ├─ lib/format.ts              # 格式化 + 展示口径纯函数
+│  ├─ lib/keyboard.ts            # 键盘事件判定纯函数
 │  └─ components/                # Toolbar / TargetTable / StatusBar /
 │                                # AddTargetsDialog / SettingsDialog /
 │                                # DetailPanel / Sparkline / LatencyChart /
-│                                # ConfirmDialog
+│                                # ExportDialog / ConfirmDialog
+├─ tests/frontend_pure.test.mjs  # 前端纯函数测试（esbuild 转译 + 依赖打桩）
 └─ src-tauri/                    # 后端（Rust）
-   ├─ Cargo.toml / build.rs / tauri.conf.json
+   ├─ Cargo.toml / Cargo.lock / build.rs / tauri.conf.json
    ├─ capabilities/default.json
    ├─ icons/                     # 全套平台图标（由 docs/app-icon.png 生成）
    └─ src/
       ├─ main.rs / lib.rs
-      ├─ model.rs                # 数据结构（serde）
+      ├─ model.rs                # 数据结构 + serde 容错（红线 R1 的落点）
       ├─ state.rs                # 全局状态 + 调度器 + 快照发射任务
-      ├─ config.rs               # 配置读写
-      ├─ stats.rs                # 统计纯函数（含单元测试）
+      ├─ config.rs               # 配置读写 + 损坏备份抢救
+      ├─ stats.rs                # 统计与设置归一纯函数
+      ├─ events.rs               # 事件日志：枚举/分级/持久化/轮转
+      ├─ fonts.rs                # 读注册表枚举系统字体
       ├─ pinger/{mod,icmp,fallback}.rs
-      ├─ commands.rs             # Tauri 命令
+      ├─ commands.rs             # Tauri 命令（19 个）
       ├─ import.rs               # txt/csv/xlsx 文件导入（读文本 / 表格 + 编码探测）
-      └─ export.rs               # CSV / TXT / HTML 导出
+      └─ export.rs               # CSV / TXT / HTML 导出 + 按结果筛选
 ```
 
 ---
@@ -346,19 +412,50 @@ pinginfo/
 - **不使用原始套接字**，保证普通用户权限可运行。
 - 所有 `spawn` 子进程均设置 `CREATE_NO_WINDOW`，不闪黑框。
 - 趋势图 / sparkline 使用原生 SVG 手写，**不引入任何图表库**。
+- 不引入状态管理库、组件库、路由库；样式只用 Tailwind。
 - 仅引入 `tauri-plugin-dialog` 一个插件（导出选择保存路径所需）。
 - CSV 导出带 UTF-8 BOM，避免 Excel 打开中文乱码。
 - 前端只依赖后端推送的聚合快照，不处理逐次探测事件。
+- **新增配置字段必须逐字段带 serde 默认值，枚举必须自定义 `deserialize_with` 做未知值降级** ——
+  否则旧配置整份反序列化失败、回落默认值，**用户全部主机列表丢失**。这是本项目最贵的一类事故，
+  完整约定见 `docs/code-review.md` 的 R1。
+- 报表导出**必须走无副作用的取数路径**（不能走会 `drain_pending()` 的快照接口），
+  否则导出一次就会吃掉前端尚未消费的事件增量。
+- 新增行为都要配「回滚到旧写法就失败」的测试，详见 `docs/code-review.md`。
 
 ## 已知限制
 
 - ICMP 主路径仅支持 IPv4；IPv6 目标自动走 `ping.exe -6` 降级路径。
 - 降级路径（`ping.exe`）使用系统默认 32 字节负载，`payload_size` 设置对降级路径不生效。
 - 导出报表中的「最后成功时间」为 UTC 时间。
+- **CSV 未防公式注入**：备注名 / 主机名若以 `=`、`+`、`@`、`-` 开头，Excel 打开时可能按公式解析。
+  当前仅做标准的逗号与引号转义。
+- 导出筛选基于**累计统计**。「清空统计」后 `sent` 归零，所有节点会同时从「零丢包」与
+  「全部未成功」两个筛选中消失（口径要求 `sent > 0`）—— 这是有意为之，见「报表导出」一节。
+- 时间列口径不同：事件日志 CSV 用**本地时间**，报表导出的「最后成功时间」用 **UTC**。
 
 ---
 
 ## 更新日志
+
+> 逐条对比 v1.1.8 与 v1.1.9 的完整差异（含兼容性判断与升级建议）见
+> [`docs/release-notes-1.1.9.md`](docs/release-notes-1.1.9.md)。
+
+### v1.1.9 — 配置韧性加固 + 报表导出按结果筛选
+
+- **新增：导出时可只导出特定结果的节点。** 工具栏「导出 ▾」新增「零丢包 / 全部未成功…」入口，
+  打开「导出报表」对话框，可同时选择**导出范围**（全部节点 / 仅选中）、**筛选口径**与**文件格式**，
+  并在对话框里**实时预览命中台数**（例如「零丢包 12 台 / 全部未成功 2 台」），导出前就知道会导出几台。
+- **两种筛选口径**（互相独立、可分别导出）：
+  - **零丢包** —— 该节点在本次统计周期内**一次都没丢过包**；
+  - **全部未成功** —— 该节点**所有 ping 一次都没成功过**。
+- 🩸 **口径定义**：两种筛选都**要求已实际发送过包**（`sent > 0`）。
+  「未开始探测」或「统计已被清空」的主机（`sent = 0`）**不会**被算进「零丢包」——
+  尽管此时丢包率显示为 0，因为它根本没发生过任何一次 ping。
+- **导出格式不变**：CSV / TXT / HTML 三种格式的**字段结构完全一致**（CSV 固定 15 列），
+  筛选**只改变导出的行集合，不改变字段结构**，因此既有的 Excel 模板与解析脚本无需任何改动。
+  「序号」在筛选后从 1 重新连续编号；TXT / HTML 会在汇总区注明本次的筛选口径。
+- **原有导出行为完全不变**：不筛选时产出的文件与本功能之前逐字节一致。
 
 ### v1.1.8 — 应用图标微调 + 首个 ARM64 实验包
 

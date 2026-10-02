@@ -49,8 +49,9 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势
 - **git 仓库：`C:\Users\22534\WorkBuddy\pinginfo`**（有 `.git`/`LICENSE`/`docs/`/`交付包/`）。
 - **`D:\pinginfo` 只是构建工作区**（有 node_modules/target/dist，**没有 `.git`**）；改配置/构建在 D 盘，
   文档改动三处同步（仓库 / D 盘 / `交付包/`）。
-- `tauri.conf.json` **基线 md5 = `2c0a8cf0fb8d8f1d5eebea6679c8d270`（v1.1.8 起，两侧须始终一致）**；提版本后须重记。
-  ⚠️ 打包变体时只改**构建侧 D 盘**的 `webviewInstallMode`，构造完立刻还原（两侧 md5 必须一致）。
+- `tauri.conf.json` **基线 md5 = `4048afd632b3cc649f5904b36727a69e`（v1.1.9 起，两侧须始终一致）**；提版本后须重记
+  （v1.1.8 时期旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。⚠️ 打包变体时只改**构建侧 D 盘**的
+  `webviewInstallMode`，构造完立刻还原（两侧 md5 必须一致）。
 
 ## 环境与本机坑
 - rustc 1.98.1 (msvc) · VS2022 + SDK 10.0.26100 · Node 22.22.2 · WebView2 153.x。
@@ -68,6 +69,9 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势
   🩸 **用 API 推送必须复刻 git 的两个规范化，否则远端与本地永久不一致**（2026-10-02 踩了两遍）：
   ① **换行符**：`.gitattributes` 是 `* text=auto eol=lf`，推之前必须 `data.replace(b"\r\n", b"\n")`，
      否则工作区 CRLF 被原样推上去（表现为 blob 永远对不上）。
+     🩸 **补充（2026-10-02 下午）**：`replace_in_file` **改**的文件保持 LF，但 **`write_to_file` 新建的
+     文件会带 CRLF** → 同步到仓库侧后 `git diff` 报 "CRLF will be replaced by LF"。
+     **双位置同步时必须逐文件查 CRLF 并在 D 侧规范化**，否则下次同步又出现假差异。
   ② **文件模式**：**Windows 上 `os.access(X_OK)` 对所有文件都返回 True**，
      会把 `.md`/`.json` 全标成 `100755`。判断可执行位只能靠扩展名（无扩展名才算脚本）。
   推完**必须逐 blob + 逐 mode 复核**（`git ls-tree -r` 对比远端 tree），不能只看内容 SHA。
@@ -126,6 +130,14 @@ React.useEffect(() => {
   表格内下探到 `slate-600` / `red-700`、延迟无数据用 `slate-600`）；**emoji 图标要控色/控粗细必须自绘 SVG**。
 
 ## 功能口径速查（回答用户提问时直接引用）
+- **报表导出筛选（v1.1.9-dev，批次 5）**：`export_report` 加可选 `filter`（`all`/`none_loss`/`all_failed`），
+  支持只导出**零丢包**（`sent>0 && failed==0`）与**全部未成功**（`sent>0 && received==0`）两类节点。
+  🩸 **判据必须带 `sent>0`** —— `sent==0`（未探测/已清空统计）时 `loss_pct` 定义为 `0.0`，
+  只判 `failed==0` 会把未开始的主机全算成零丢包（已变异实测锁死）。
+  **筛选只改行集合不改字段结构**（CSV 恒 15 列 / HTML 恒 15 个 `<th>`）；`All` 产出与上线前逐字节一致。
+  判据**有两份实现**：前端 `format.ts::matchesExportFilter`（只做命中台数预览）+ Rust `export::matches_filter`（写文件权威），
+  **改判据必须两侧同改**。入口 = 工具栏「导出 ▾」第 3 组 → `ExportDialog`。
+  完整设计见 `docs/export-filter-design.md`。
 - **累加限制**：单次上限 1024（前端 `MAX_BATCH`，含 IP 段展开）；**跨批次累加无任何上限**；限制只在**启动**时发生 ——
   `max_threads`（默认 256，可调 1..1024）在 `limit_max_threads=true` 时拦截，关闭后仍保留 **4096 硬保护**。
 - **重复判定**：host `trim + 小写` 后比较；跨批次重复**只在前端 UI 拦截**（后端 `add_targets` 不查重）。
