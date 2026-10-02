@@ -7,18 +7,17 @@ src-tauri/gen/
 # Vite 配置加载临时文件
 vite.config.ts.timestamp-*.mjs
 
+# QA 临时探针产物（变异测试脚本、基线快照等），不入库
+qa-artifacts/
+qa-*.png
+
+# 交付包：安装包与截图产物，不入库（走 GitHub Release 附件分发）
+# 原因：完整离线版单个安装包 217 MB，超过 GitHub 单文件 100 MB 硬上限
+交付包/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
 *.swp
 Thumbs.db
 Desktop.ini
-
-# 内部工作目录（不随源码发布）
-.workbuddy/
-qa-artifacts/
-交付包/
-qa-window.png
-
-# 日志
-*.log

@@ -16,6 +16,14 @@ import os from "node:os";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
+/**
+ * 剥掉块注释与行注释，只留可执行代码。
+ * 必须剥：源码里多处注释会提到 `doAdd([entry])`、`window.confirm` 这类字面量
+ * （例如 decideAdd 的说明注释里就写着「曾直接调 `doAdd([entry])`」），
+ * 直接扫原文会把说明文字误判成真实调用。
+ */
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 /** 把 react / @tauri-apps 相关依赖替换为空桩，便于在 Node 里直接加载组件模块 */
 const stubPlugin = {
   name: "qa-stub",
@@ -74,7 +82,13 @@ let pass = 0;
 const failures = [];
 function check(name, fn) {
   try {
-    fn();
+    const r = fn();
+    // 拒绝 thenable：`check` 是同步调用 + 同步 try/catch，若有人误写 `async () => {...}`，
+    // 返回的 Promise 永远不会同步 throw → 用例静默 pass++。这种"写了但不会失败"的用例
+    // 比没写测试更危险（虚假安全感），因此在这里显式拦截并报错。
+    if (r && typeof r.then === "function") {
+      throw new Error("check() 不支持异步用例：请改为同步断言，或新增 asyncCheck() 并 await");
+    }
     pass++;
   } catch (e) {
     failures.push({ name, message: e && e.message ? e.message : String(e) });
@@ -94,7 +108,7 @@ const dlg = await loadPure("src/components/AddTargetsDialog.tsx");
 const fmt = await loadPure("src/lib/format.ts");
 const settings = await loadPure("src/components/SettingsDialog.tsx");
 
-const { expandIpRange, parseBatch, findDuplicateHosts } = dlg;
+const { expandIpRange, parseBatch, findDuplicateHosts, decideAdd, tableToBatchText } = dlg;
 
 /* ---------- expandIpRange ---------- */
 check("expandIpRange('192.168.1.1-254') 长度 254 且首尾正确", () => {
@@ -322,6 +336,11 @@ check("R2 修复复验：parseBatch 超大区间仍截断到 1024", () => {
 /* ============ Round 5 固化：跨批次重复检测（单个添加曾绕过，E4 回归保护） ============ */
 // 依据：三条提交路径（单个 / 批量 / 文件）必须共用同一套重复检测；
 // 比较规则 = host 去首尾空白 + 转小写，重复时返回 host 原文供弹窗展示。
+//
+// ⚠️ 断言对象从 findDuplicateHosts 换成 decideAdd：原来的用例名说「单条与批量口径一致」，
+// 断言的却只是 findDuplicateHosts 本身 —— 把 onSubmitSingle 回滚成 `void doAdd([entry])`
+// 它依然全绿（纯函数没坏，坏的是接线）。真正的行为锁由下面的 decideAdd 决策用例
+// + Round 7 的静态接线守卫共同承担。
 
 check("findDuplicateHosts 命中已有目标（大小写不敏感 + 去首尾空白）", () => {
   eq(
@@ -340,14 +359,342 @@ check("findDuplicateHosts 无重复 → 空数组；空输入 → 空数组", ()
   eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], []), []);
 });
 
-check("findDuplicateHosts 三条路径同口径：单条输入与批量解析结果检测一致", () => {
-  // 单个添加路径：[{host: 输入框原文}]；批量路径：parseBatch 输出 —— 两者过同一函数必须等价
+/* ---------- decideAdd：添加决策（空 / 确认 / 直接添加） ---------- */
+check("decideAdd 三条路径同口径：单条输入与批量解析结果决策一致", () => {
+  // 单个添加路径：[{host: 输入框原文}]；批量路径：parseBatch 输出 —— 两者过同一决策必须等价
   const existing = ["192.0.2.1"];
-  const single = findDuplicateHosts([{ host: "192.0.2.1", name: "192.0.2.1" }], existing);
-  const batch = findDuplicateHosts(parseBatch("192.0.2.1"), existing);
-  eq(single.length, 1, "单个添加必须检出重复（曾直接 doAdd 绕过检测）");
-  eq(batch.length, 1);
-  eq(single[0].toLowerCase(), batch[0].toLowerCase(), "命中 host 一致");
+  const single = decideAdd([{ host: "192.0.2.1", name: "192.0.2.1" }], existing);
+  const batch = decideAdd(parseBatch("192.0.2.1"), existing);
+  eq(single.action, "confirm", "单个添加必须走确认（曾直接 doAdd 绕过检测）");
+  eq(batch.action, "confirm", "批量路径同样走确认");
+  eq(single.dups.length, 1, "单个添加必须检出 1 个重复");
+  eq(batch.dups.length, 1);
+  eq(single.dups[0].toLowerCase(), batch.dups[0].toLowerCase(), "命中 host 一致");
+});
+
+check("decideAdd 空输入 → reject", () => {
+  eq(decideAdd([], ["a"]).action, "reject", "空条目必须被拒绝");
+});
+
+check("decideAdd 命中已有目标 → confirm 且带回重复 host 原文", () => {
+  const d = decideAdd([{ host: "192.0.2.1", name: "x" }], ["192.0.2.1"]);
+  eq(d.action, "confirm");
+  eq(d.dups, ["192.0.2.1"], "dups 应为 host 原文");
+  eq(d.entries.length, 1, "confirm 分支必须原样带回 entries");
+});
+
+check("decideAdd 无重复 → add（直接提交，不弹确认）", () => {
+  const d = decideAdd([{ host: "9.9.9.9", name: "x" }], ["192.0.2.1"]);
+  eq(d.action, "add");
+  eq(d.entries, [{ host: "9.9.9.9", name: "x" }], "add 分支必须原样带回 entries");
+});
+
+check("decideAdd 混合批次：部分重复仍走 confirm，dups 只含重复项", () => {
+  const d = decideAdd(
+    [
+      { host: "10.0.0.1", name: "新" },
+      { host: "192.0.2.1", name: "旧" },
+    ],
+    ["192.0.2.1"]
+  );
+  eq(d.action, "confirm");
+  eq(d.dups, ["192.0.2.1"], "dups 只应含重复项，不含新增项");
+  eq(d.entries.length, 2, "entries 应保留全部条目，由用户在弹窗里选择");
+});
+
+check("decideAdd 属性：action 只可能是 reject / add / confirm 三种", () => {
+  const allowed = ["reject", "add", "confirm"];
+  const samples = [
+    [[], ["a"]],
+    [[{ host: "1.1.1.1", name: "a" }], ["2.2.2.2"]],
+    [[{ host: "1.1.1.1", name: "a" }], ["1.1.1.1"]],
+  ];
+  for (const [entries, existing] of samples) {
+    const a = decideAdd(entries, existing).action;
+    if (!allowed.includes(a)) throw new Error(`出现未知 action：${a}`);
+  }
+});
+
+/* ---------- Round 5b：添加提交路径接线守卫（静态源码断言） ---------- */
+// 为什么需要这一组：decideAdd 是纯函数测试，天生测不出「某个调用点忘了调它」。
+// 单个添加路径曾直接 `void doAdd([entry])` 绕过跨批次重复检测，而当时所有用例全绿
+// —— 纯函数没坏，坏的是接线。因此这里读源码文本，断言提交路径都接到统一入口。
+//
+// ── 能力边界（务必如实理解，不要高估）──────────────────────────────
+// 本组守卫按「函数名 + 字面调用」匹配文本，它防的是**最可能的那一类回归**：
+// 把 `submitEntries(x)` 直接改回 `doAdd(x)`（即本批次刚根治的历史缺陷）。
+//
+// 已知**不在**其覆盖范围内（QA 构造绕过变体实测确认）：
+//   ① 别名调用     `const g = doAdd; g([entry])`   —— 文本里没有 `doAdd(` 字面量
+//   ② 间接调用     `submitEntries.apply(null,[entry])`
+//   ③ 将来新增的第 4 个提交入口（旧的「按名字列举」式守卫列不到它）
+//
+// ①② 是文本法的天花板，纯静态断言无法可靠识别；根治手段是用真实 React 桩渲染组件、
+// 在 api 层放间谍、断言「重复目标绝不能到达 addTargets」的运行时测试（已列入待办）。
+// ③ 由下面那条**倒置守卫（白名单式）**补上：它不靠列举函数名，而是复查
+// 「全文每一处 doAdd( 是否都落在白名单函数体内」，因此新增入口必然报警。
+//
+// ⚠️ 另一处有意的取舍：花括号配对 + 标识符名 → 对重命名敏感。
+// 重命名 onSubmitSingle / doAdd 时必须同步更新此处；那是一次显式的人工确认，
+// 好过悄悄绕过跨批次重复检测。
+
+/**
+ * 从源码文本中截出 `const NAME = ...` 声明的文本。
+ * 优先做花括号配对；若是无花括号的表达式体（`() => submitEntries(parsed);`），
+ * 退化为截到该声明的 `;`。
+ */
+function extractDecl(src, name) {
+  const start = src.indexOf(`const ${name}`);
+  if (start < 0) return null;
+  const brace = src.indexOf("{", start);
+  const semi = src.indexOf(";", start);
+  if (brace < 0 || (semi >= 0 && semi < brace)) {
+    return semi >= 0 ? src.slice(start, semi + 1) : null;
+  }
+  let depth = 0;
+  for (let i = brace; i < src.length; i++) {
+    const c = src[i];
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * 定位一个函数在源码中的覆盖区间 `{ start, end }`。
+ * 同时支持两种写法：`const NAME = ...` 与 JSX 属性 `name={() => {...}`
+ * （ConfirmDialog 的 onSecondary / onConfirm 属于后者）。
+ */
+function regionOf(src, name) {
+  const constIdx = src.indexOf(`const ${name}`);
+  if (constIdx >= 0) {
+    const d = extractDecl(src, name);
+    if (d) return { start: constIdx, end: constIdx + d.length };
+  }
+  const jsxIdx = src.indexOf(`${name}={() => {`);
+  if (jsxIdx >= 0) {
+    const brace = src.indexOf("{", jsxIdx + name.length);
+    let depth = 0;
+    for (let i = brace; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") {
+        depth--;
+        if (depth === 0) return { start: jsxIdx, end: i + 1 };
+      }
+    }
+  }
+  return null;
+}
+
+const addDlgSrc = fs.readFileSync(path.join(projectRoot, "src", "components", "AddTargetsDialog.tsx"), "utf8");
+const addDlgCode = stripComments(addDlgSrc);
+
+check("接线守卫：onSubmitSingle 走 submitEntries，不得直接 doAdd", () => {
+  const body = extractDecl(addDlgCode, "onSubmitSingle");
+  if (body === null) throw new Error("未找到 onSubmitSingle 声明（被重命名/删除？）");
+  if (!body.includes("submitEntries(")) {
+    throw new Error("onSubmitSingle 未调用 submitEntries —— 接线断了，跨批次重复检测会被绕过");
+  }
+  if (body.includes("doAdd(")) {
+    throw new Error("onSubmitSingle 直接调用了 doAdd —— 绕过 decideAdd，重复检测失效（E4 回归）");
+  }
+});
+
+check("接线守卫：onSubmitBatch / onSubmitFile 同样走 submitEntries", () => {
+  for (const name of ["onSubmitBatch", "onSubmitFile"]) {
+    const body = extractDecl(addDlgCode, name);
+    if (body === null) throw new Error(`未找到 ${name} 声明（被重命名/删除？）`);
+    if (!body.includes("submitEntries(")) throw new Error(`${name} 未调用 submitEntries —— 接线断了`);
+    if (body.includes("doAdd(")) throw new Error(`${name} 直接调用了 doAdd —— 绕过 decideAdd`);
+  }
+});
+
+check("接线守卫：三条路径都接上（submitEntries( 至少 3 处调用点）", () => {
+  const callSites = addDlgCode.match(/submitEntries\s*\(/g) || [];
+  // 1 = onSubmitSingle、1 = onSubmitBatch、1 = onSubmitFile；定义处写作 `submitEntries = (` 不计入
+  if (callSites.length < 3) {
+    throw new Error(`submitEntries( 仅有 ${callSites.length} 处调用点，应 ≥ 3（单个 / 批量 / 文件三条路径）`);
+  }
+});
+
+check("接线守卫：submitEntries 内部必须调 decideAdd（决策收敛到单一入口）", () => {
+  const body = extractDecl(addDlgCode, "submitEntries");
+  if (body === null) throw new Error("未找到 submitEntries 声明（被重命名/删除？）");
+  if (!body.includes("decideAdd(")) throw new Error("submitEntries 未调用 decideAdd —— 决策逻辑分散了");
+});
+
+/* ---------- Round 5c：倒置守卫（白名单式）—— 补上「新增第 4 个入口」的缺口 ---------- */
+// 思路反转：上面几条是「黑名单列举」（去三个已知函数里查 doAdd），所以列不到
+// **将来新增**的第 4 个提交入口 —— QA 的 V4 变体（新入口直接 doAdd）实测 79/0 全绿漏报，
+// 而那复现的正是本批次刚根治的同一个 bug。
+//
+// 改为白名单：复查「全文每一处 doAdd( 是否都落在允许的函数体内」。
+// 新增入口必然不在白名单里 → 必然报警。白名单三项的语义已逐行复核：
+//   ① submitEntries —— decideAdd 判定为 add（即无重复）时才提交
+//   ② onSecondary  —— 确认弹窗「仍然全部添加 N 个」，用户已显式决策
+//   ③ onConfirm    —— 确认弹窗「跳过重复，添加 N 个」，用户已显式决策且已过滤重复项
+const DOADD_ALLOWED = ["submitEntries", "onSecondary", "onConfirm"];
+
+check("倒置守卫：doAdd( 的每一处出现都必须落在白名单函数体内", () => {
+  const code = addDlgCode;
+
+  // ① 收集 doAdd( 的全部出现位置
+  const hits = [];
+  const re = /doAdd\s*\(/g;
+  let m;
+  while ((m = re.exec(code)) !== null) hits.push(m.index);
+  if (hits.length === 0) throw new Error("未找到任何 doAdd( 调用点 —— 提交链路可能被整体删除");
+
+  // ② 解析白名单函数覆盖的区间
+  const regions = DOADD_ALLOWED.map((n) => {
+    const r = regionOf(code, n);
+    if (r === null) throw new Error(`未找到白名单函数 ${n}（被重命名？）`);
+    return { name: n, start: r.start, end: r.end };
+  });
+
+  // ③ 每一处 doAdd( 都必须落在某个白名单区间内
+  const strays = [];
+  for (const pos of hits) {
+    const owner = regions.find((d) => pos >= d.start && pos < d.end);
+    if (!owner) {
+      const near = code.slice(Math.max(0, pos - 90), pos + 30).replace(/\s*\n\s*/g, " ⏎ ");
+      strays.push(`· …${near}…`);
+    }
+  }
+  if (strays.length > 0) {
+    throw new Error(
+      `doAdd( 出现在白名单之外（新增入口直连 doAdd，绕过 decideAdd）：\n      ${strays.join("\n      ")}`
+    );
+  }
+
+  // ④ 反向：白名单三项必须真的各含至少一处 doAdd(，否则等于把某条合法提交链路删了
+  for (const d of regions) {
+    const n = hits.filter((pos) => pos >= d.start && pos < d.end).length;
+    if (n === 0) throw new Error(`白名单函数 ${d.name} 内没有任何 doAdd( —— 合法提交链路可能被删除`);
+  }
+});
+
+check("倒置守卫：三条提交路径必须真的调用 submitEntries（与倒置守卫互为反向）", () => {
+  for (const n of ["onSubmitSingle", "onSubmitBatch", "onSubmitFile"]) {
+    const body = extractDecl(addDlgCode, n);
+    if (body === null) throw new Error(`未找到 ${n}`);
+    if (!/submitEntries\s*\(/.test(body)) throw new Error(`${n} 未调用 submitEntries(`);
+  }
+});
+
+check("接线守卫：不得出现 window.confirm / window.alert（确认交互一律自绘 ConfirmDialog）", () => {
+  // 用模块级 stripComments：ConfirmDialog.tsx 的文件头注释里写着「替代 window.confirm」，
+  // 直接扫原文会把这行说明误判成违规调用。
+  for (const rel of [
+    "src/components/AddTargetsDialog.tsx",
+    "src/components/ConfirmDialog.tsx",
+    "src/components/SettingsDialog.tsx",
+    "src/App.tsx",
+  ]) {
+    const src = stripComments(fs.readFileSync(path.join(projectRoot, ...rel.split("/")), "utf8"));
+    for (const banned of ["window.confirm", "window.alert"]) {
+      if (src.includes(banned)) throw new Error(`${rel} 出现被禁用的 ${banned}，请改用 ConfirmDialog`);
+    }
+  }
+});
+
+/* ---------- Round 8 补零覆盖：红线 R12 前端守护点（statusRowClass / eventColorClass / isUnreadKind） ---------- */
+// 这三个函数此前零测试覆盖，而它们正是红线 R12「绿=正常 / 红=失败」在前端的唯一守护点：
+// 改错了没有任何测试会拦你，而后果是「失败行变绿」这类静默失真。
+
+check("statusRowClass 红线 R12：ok=绿 / failed·timeout=红 / resolving=蓝 / idle=灰", () => {
+  const want = {
+    ok: "bg-emerald-50",
+    timeout: "bg-red-50",
+    failed: "bg-red-50",
+    resolving: "bg-sky-50",
+    idle: "bg-slate-50",
+  };
+  for (const [s, cls] of Object.entries(want)) {
+    const got = fmt.statusRowClass(s);
+    if (!got.includes(cls)) throw new Error(`statusRowClass(${s}) 应含 ${cls}，实际「${got}」`);
+  }
+});
+
+check("statusRowClass 红线 R12：ok 绝不可红，failed/timeout 绝不可绿（防静默失真）", () => {
+  if (fmt.statusRowClass("ok").includes("bg-red-")) throw new Error("ok 行不得用红底（失败行变绿 / 正常行变红）");
+  for (const s of ["failed", "timeout"]) {
+    if (fmt.statusRowClass(s).includes("bg-emerald-")) throw new Error(`${s} 行不得用绿底（失败行变绿）`);
+  }
+  if (fmt.statusRowClass("idle").includes("bg-emerald-")) throw new Error("idle 行不得用绿底");
+  if (fmt.statusRowClass("resolving").includes("bg-red-")) throw new Error("resolving 行不得用红底");
+});
+
+check("statusRowClass 未知状态回落 idle（不得返回空串，否则行底丢失）", () => {
+  const fallback = fmt.statusRowClass("unknown-status");
+  if (!fallback.includes("bg-slate-50")) throw new Error(`未知状态应回落 idle 灰底，实际「${fallback}」`);
+  if (fallback.trim() === "") throw new Error("未知状态不得返回空串");
+});
+
+check("eventColorClass 故障类红 / 恢复类绿 / 其余灰", () => {
+  for (const k of ["fault", "unreachable", "dns_fail"]) {
+    const got = fmt.eventColorClass(k);
+    if (!got.includes("text-red-600")) throw new Error(`eventColorClass(${k}) 应为红色档，实际「${got}」`);
+  }
+  for (const k of ["recover", "first_ok"]) {
+    const got = fmt.eventColorClass(k);
+    if (!got.includes("text-emerald-700")) throw new Error(`eventColorClass(${k}) 应为绿色档，实际「${got}」`);
+  }
+  for (const k of ["start", "stop", "config_change"]) {
+    const got = fmt.eventColorClass(k);
+    if (!got.includes("text-slate-600")) throw new Error(`eventColorClass(${k}) 应为灰色档，实际「${got}」`);
+  }
+});
+
+check("isUnreadKind 未读红点口径：故障类计入，recover 不计入", () => {
+  for (const k of ["fault", "unreachable", "dns_fail"]) {
+    if (fmt.isUnreadKind(k) !== true) throw new Error(`${k} 应计入未读红点`);
+  }
+  for (const k of ["recover", "first_ok", "start", "stop", "config_change"]) {
+    if (fmt.isUnreadKind(k) !== false) throw new Error(`${k} 不应计入未读红点（recover 计入会导致恢复后红点不消）`);
+  }
+});
+
+check("isUnreadKind 返回值恒为布尔（不返回真值/假值）", () => {
+  for (const k of ["fault", "recover", "start", "stop", "config_change", "dns_fail", "unreachable", "first_ok"]) {
+    const r = fmt.isUnreadKind(k);
+    if (typeof r !== "boolean") throw new Error(`isUnreadKind(${k}) 应返回 boolean，实际 ${typeof r}`);
+  }
+});
+
+/* ---------- Round 8 补零覆盖：tableToBatchText（Excel/CSV 表头识别） ---------- */
+check("tableToBatchText 识别「主机/备注」表头并跳过", () => {
+  eq(tableToBatchText([["主机", "备注"], ["1.1.1.1", "阿里"], ["2.2.2.2", "腾讯"]]), "1.1.1.1\t阿里\n2.2.2.2\t腾讯");
+});
+
+check("tableToBatchText 表头识别大小写不敏感且兼容英文候选", () => {
+  eq(tableToBatchText([["IP", "Name"], ["1.1.1.1", "a"]]), "1.1.1.1\ta", "IP/Name 应识别为表头");
+  eq(tableToBatchText([["Host", "备注"], ["1.1.1.1", "a"]]), "1.1.1.1\ta", "Host/备注 应识别为表头");
+});
+
+check("tableToBatchText 仅第 1 列命中不算表头（须两列同时命中才跳过）", () => {
+  eq(tableToBatchText([["主机", "8.8.8.8"], ["1.1.1.1", "a"]]), "主机\t8.8.8.8\n1.1.1.1\ta");
+});
+
+check("tableToBatchText 备注列为空 → 只输出主机名", () => {
+  eq(tableToBatchText([["1.1.1.1", ""], ["2.2.2.2"]]), "1.1.1.1\n2.2.2.2");
+});
+
+check("tableToBatchText 主机列为空的行被跳过；全空 → 空串", () => {
+  eq(tableToBatchText([["1.1.1.1", "a"], ["", "孤行"], ["   ", "空白行"], ["2.2.2.2", "b"]]), "1.1.1.1\ta\n2.2.2.2\tb");
+  eq(tableToBatchText([]), "");
+  eq(tableToBatchText([["", ""]]), "");
+});
+
+check("tableToBatchText 结果可被 parseBatch 无损回读（Excel → 批量文本 → 条目）", () => {
+  const text = tableToBatchText([["主机名", "备注名"], ["1.1.1.1", "阿里 DNS"], ["www.baidu.com", ""]]);
+  const entries = parseBatch(text);
+  eq(entries.length, 2, "应解析出 2 个目标");
+  eq(entries[0], { host: "1.1.1.1", name: "阿里 DNS" });
+  eq(entries[1], { host: "www.baidu.com", name: "www.baidu.com" }, "空备注应回落为主机名");
 });
 
 /* ============ Round 3 固化：defaultEventsFile（设置对话框默认事件文件路径） ============ */

@@ -182,7 +182,7 @@ cargo test
 npm test                      # tests/frontend_pure.test.mjs
 
 # 人工 QA（全量通道必做）
-# QA 脚本与历史产物见 qa-artifacts/；性能用例：100 目标 stop < 300ms
+# QA 临时探针与截图见 qa-artifacts/（不入库）；需长期保存的复审报告放 docs/reviews/。性能用例：100 目标 stop < 300ms
 ```
 
 ---
