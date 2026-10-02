@@ -36,13 +36,19 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 
 | 位置 | 作用 | 有无 `.git` |
 |---|---|---|
-| `C:\Users\22534\WorkBuddy\pinginfo` | **唯一正式仓库**（源码 + `交付包\`，SSH 推送 github.com/halacrcrc/PingBoard） | ✅ |
+| `C:\Users\22534\WorkBuddy\pinginfo` | **唯一正式仓库**（源码 + `交付包\`，HTTPS 推送 github.com/halacrcrc/PingBoard） | ✅ |
 | `D:\pinginfo` | **构建工作区**（有 node_modules / target / dist，改配置、打包、跑构建都在这里） | ❌ |
 
 **规则**：改代码/配置在 D 盘跑通后，源码与文档要同步回仓库侧；`docs/` 两侧都要有。
 ⚠️ `qa-artifacts/` 是**临时产物目录**（变异探针、基线快照、截图），已在 `.gitignore` 中，**不要**往里放需要入库的文档。
 需要长期保存的复审报告放 `docs/reviews/`。
 `交付包\` 里的 README 也要一并更新（三处同步：仓库 / D 盘 / 交付包）。
+
+🩸 **`.gitignore` 必须排除 `交付包/`**（2026-09-30 教训）。它**只存在于仓库侧**、不入库：
+- 体积 881 MB / 31 个文件，其中三个「完整离线版」各 **217 MB**，**远超 GitHub 单文件 100 MB 硬上限**，
+  误 `git add -A` 会直接被 GitHub 拒收；
+- 安装包通过 **Release 附件**分发（见 `github-push-and-release` 技能），仓库只管源码。
+推历史包时用 `git add <具体路径>`，**永远不要在仓库根裸跑 `git add -A`**。
 
 `src-tauri/tauri.conf.json` **基线 md5 = `2c0a8cf0fb8d8f1d5eebea6679c8d270`（v1.1.8 起，两侧必须始终一致）**。
 打包变体时只改**构建侧 D 盘**的 `webviewInstallMode`，构造完立刻还原。
