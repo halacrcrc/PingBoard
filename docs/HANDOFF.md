@@ -85,10 +85,11 @@ v1.1.8 **不需要回滚**，但 🔴 应在 **v1.1.9 全部清零**。
 | 批次 3 | 测试基建 + 让测试真正能失败（`package.json` 加 test 脚本、`decideAdd()` / `compare()` / `consumeEvents()` 抽纯函数） | ⏳ 未开始 |
 | 批次 4 | 行为类 🟡（B1 事件被旁路消费 / B2 清空未清 pending / B3 幽灵 worker / B9 删目标不清事件等） | ⏳ 未开始 |
 
-### 5.2 批次 2 系列：销项状态（**代码侧已全部做完，仅剩实机验证**）
+### 5.2 批次 2 系列：销项状态（**R1 已全闭合，4 条判据全满足**）
 
 批次 2 / 2b / 2c 全部落盘并已合并提交为 `59f22d5`（**已推送**）。`cargo test --lib` 143 全绿、`tsc --noEmit` 0 error。
 架构师终审：**0 🔴**，并判定「代码侧的 R1 主线已经做完，质量高于基线」。
+**2026-10-02 补**：判据 4 人工 QA 已实测通过（见 5.2.2.1），**R1 正式全闭合**。
 
 | # | 问题 | 状态 |
 |---|---|---|
@@ -119,14 +120,56 @@ v1.1.8 **不需要回滚**，但 🔴 应在 **v1.1.9 全部清零**。
 | 1 | 🔴-1 修复 + 配套哨兵测试（坏值不得让邻座主机消失、不得连带丢 settings） | ✅ 满足 |
 | 2 | 🔴-2 notice 通道打通且**用户真的读得到** | ✅ 满足（2c 修复 toast 后才真正满足） |
 | 3 | 🟡-1 `load` 与 `parse_with_recovery` 合一，回滚抢救逻辑测试变红 | ✅ 满足 |
-| 4 | **人工 QA：真实旧配置文件端到端实测** | ❌ **未执行 —— 发布前必须补** |
+| 4 | **人工 QA：真实旧配置文件端到端实测** | ✅ **满足（2026-10-02 实测，见下）** |
 
-**判据 4 的可执行步骤**（详见 `docs/HANDOFF.md` 历史版本或架构师报告 §3）：
-1. 配置路径 `C:\Users\<用户名>\AppData\Roaming\com.pingboard.desktop\pingboard-config.json`，**先复制一份到桌面当还原点**。
-2. 用一份 v1.1.0 旧配置（或构造只含早期字段的 JSON），把某台主机的 `"enabled": true` 改成 `"enabled": "yes"`。建议同时放一台 `"enabled": false` 的哨兵主机。
-3. 启动应用，四条判定：**① 3 行主机都在 ② 坏条目的 host 保形为 `223.5.5.5`（不是空）③ 双击可编辑且改完重启仍在 ④ 邻座「未启用」未被翻转，且不弹损坏提示**。
-4. 负向对照：`targets` 数组末尾加一个 `null` → 重启 → 应弹提示（含备份完整路径 + 抢救条数）、主机仍在、配置目录多出 `pingboard-config.corrupt-<时间戳>.json`。
-5. 还原：把还原点拷回去，删掉测试产生的 `corrupt-` 备份。
+### 5.2.2.1 判据 4 人工 QA 实测报告（2026-10-02）
+
+**环境**：`cargo build` debug 版 + `npm run dev`（vite dev server 必须先起，否则 debug exe 白屏）。
+临时给 `additionalBrowserArgs` 加 `--remote-debugging-port=9333` 走 CDP 精确读 DOM / 调命令，
+**测完已还原**（`tauri.conf.json` md5 回到基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270`）。
+
+**构造配置**：3 台主机 —— ①`enabled:"yes"`（字符串）②`enabled:1`（数字）③`enabled:false`（哨兵）。
+
+| 判定 | 期望 | 实测 | 结论 |
+|---|---|---|---|
+| ① 3 行主机都在 | 3 | 3（标题栏「共 3 台」，tbody 3 行） | ✅ |
+| ② 坏条目 host 保形 | `223.5.5.5` 非空 | `223.5.5.5` | ✅ |
+| ③ 可编辑且重启仍在 | 改 host 后重启保留 | `223.5.5.5`→`1.1.1.1` 已写入磁盘，重启后仍为 `1.1.1.1` | ✅ |
+| ④ 邻座未启用未被翻转 | 仍 false | `enabled=false`；且 `start_pinging(null)` **只启动 2 台，跳过哨兵** | ✅ |
+| ⑤ 不弹损坏提示 | 无 toast | 无任何 fixed 浮层 | ✅ |
+
+**`enabled` 实际解析值**（`get_state` 直读，非仅看界面）：
+
+| 备注名 | 配置里写的 | 解析结果 | 说明 |
+|---|---|---|---|
+| 坏值主机 | `"yes"` | **`true`** | 批次 2c 字符串臂生效 |
+| 字符串数字主机 | `1` | **`true`** | 数字臂生效 |
+| 哨兵未启用 | `false` | **`false`** | 邻座未被连带污染 |
+
+`enabled` 过滤实测：调 `start_pinging(null)` → 2 台 `status=ok`（真实 ping 通）、哨兵保持 `idle`。
+⚠️ **「未开始」徽标是 `Status`（探测状态 `idle`），与 `enabled` 无关** —— v1.1.2 起表格已无 `enabled` 列，
+**别拿徽标判断 `enabled`**，要调 `get_state`。
+
+**负向对照**（`targets` 末尾加 `null`）：
+- 抢救出 **3 台**，`null` 被丢弃 ✅
+- 界面 toast 真的弹出来了（读 `position:fixed` 浮层拿到全文）：
+  「配置文件已损坏，已备份原文件到 `…\pingboard-config.corrupt-1790946333915.json`，
+  从中抢救回 **3** 个主机。当前正在使用抢救后的配置…」✅ —— 含**完整路径 + 抢救条数**。
+- 配置目录生成 `pingboard-config.corrupt-1790946333915.json`（895 B，**完整保留含 `null` 的原始 4 元素**）✅
+- `take_startup_notice` 二次调用返回 `null` —— **这是正确行为**（one-shot 语义，应用启动时已消费）。
+
+**环境已还原**：配置目录回到测试前 md5（`pingboard-config.json` 814 B / `events.jsonl` 7594 B），
+corrupt 备份已删，dev server 与 9333 端口已关，备份与截图在 `C:\Users\22534\Desktop\pingboard-qa-backup\`。
+
+**复现要点（下次做端到端 QA 直接照抄）**：
+1. `cargo build` 后**必须**先 `npm run dev`（debug exe 走 `devUrl=http://localhost:1420`，否则白屏「localhost 拒绝连接」）。
+2. 后台起进程要用后台任务的 `run_in_background`，**`cmd &` 起的子进程会在工具返回时被杀**。
+3. 坐标点击不准（缩放 + `ui_scale` 影响），**改用 CDP**：`additionalBrowserArgs` 加
+   `--remote-debugging-port=9333`，`GET /json/list` 拿 `webSocketDebuggerUrl`，
+   `Runtime.evaluate` 就能读 DOM、还能 `window.__TAURI_INTERNALS__.invoke('get_state')` 直问后端。
+4. Tauri 命令参数是**扁平**的（`update_target` 收 `{id, name, host, enabled}`，**不是 patch 对象**）。
+5. 改 `tauri.conf.json` 测完**必须还原并核对 md5**（`json.dump` 会重排格式，md5 必变）。
+
 
 ### 5.3 其余已知待办（未开始）
 
