@@ -149,6 +149,26 @@ export function findDuplicateHosts(entries: TargetEntry[], existingHosts: string
   return dups;
 }
 
+/** 添加决策结果：空输入拒绝 / 无重复直接添加 / 有重复需用户确认 */
+export type AddDecision =
+  | { action: "reject" }
+  | { action: "add"; entries: TargetEntry[] }
+  | { action: "confirm"; entries: TargetEntry[]; dups: string[] };
+
+/**
+ * 添加决策（纯函数）：空条目拒绝 / 无重复直接添加 / 有重复走确认。
+ *
+ * 抽成纯函数的原因：单个添加路径曾直接调 `doAdd([entry])` 绕过跨批次重复检测，
+ * 而当时唯一的测试只断言 `findDuplicateHosts` 本身 —— 纯函数没坏，坏的是接线，
+ * 于是「测试全绿」给出了虚假安全感（见 docs/code-review.md §6「能失败才证明测试有效」）。
+ * 决策集中到这一个函数后，三条提交路径只有一处接线，配合 tests 中的静态接线守卫才守得住。
+ */
+export function decideAdd(entries: TargetEntry[], existingHosts: string[]): AddDecision {
+  if (entries.length === 0) return { action: "reject" };
+  const dups = findDuplicateHosts(entries, existingHosts);
+  return dups.length === 0 ? { action: "add", entries } : { action: "confirm", entries, dups };
+}
+
 const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts }) => {
   const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
@@ -232,7 +252,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     }
   };
 
-  /** 单个添加提交：与批量 / 文件路径共用同一套跨批次重复检测与确认弹窗（修复曾直接 doAdd 绕过检测） */
+  /** 单个添加提交：只负责构造条目，决策统一交给 submitEntries（修复曾直接 doAdd 绕过重复检测） */
   const onSubmitSingle = () => {
     const h = host.trim();
     if (!h) {
@@ -240,26 +260,37 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
       return;
     }
     const entry: TargetEntry = { host: h, name: name.trim() || h };
-    submitEntries([entry], findDuplicateHosts([entry], existingHosts));
+    submitEntries([entry]);
   };
 
-  /** 批量 / 文件提交入口：存在重复时弹确认框让用户选择，否则直接提交 */
-  const submitEntries = (entries: TargetEntry[], dups: string[]) => {
-    if (entries.length === 0) {
+  /**
+   * 批量 / 文件 / 单个提交的唯一入口：决策逻辑在 decideAdd（纯函数，可单测）。
+   *
+   * ⚠️ 约定：新的提交路径必须经过这里，不得直接调 doAdd —— 否则跨批次重复检测会被绕过
+   * （单个添加路径历史上就是这么绕过检测的）。doAdd 的合法调用点仅三处：
+   *   ① 本函数（decideAdd 判定为 add 即无重复时）
+   *   ②③ 下方确认弹窗的 onSecondary / onConfirm（用户已显式决策）
+   * tests/frontend_pure.test.mjs 有「倒置守卫」按此白名单复查全文的 doAdd( 调用点。
+   * 注意那是**文本**匹配：别名调用（`const g = doAdd; g(x)`）与 `.apply` 间接调用
+   * 超出其能力范围，根治要靠运行时断言（api 层间谍，见待办）。
+   */
+  const submitEntries = (entries: TargetEntry[]) => {
+    const d = decideAdd(entries, existingHosts);
+    if (d.action === "reject") {
       setError("请输入至少一个主机名或 IP 地址");
       return;
     }
-    if (dups.length === 0) {
-      void doAdd(entries);
+    if (d.action === "add") {
+      void doAdd(d.entries);
       return;
     }
     setError(null);
-    setDupPrompt({ entries, dups });
+    setDupPrompt({ entries: d.entries, dups: d.dups });
   };
 
-  const onSubmitBatch = () => submitEntries(parsed, dupInfo.hosts);
+  const onSubmitBatch = () => submitEntries(parsed);
 
-  const onSubmitFile = () => submitEntries(fileEntries, dupInfo.hosts);
+  const onSubmitFile = () => submitEntries(fileEntries);
 
   /** 打开文件对话框 → 读取内容 → 解析（不在此处提交） */
   const pickFile = async () => {
