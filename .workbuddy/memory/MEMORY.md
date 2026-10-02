@@ -65,6 +65,12 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势
   `git ls-tree -r` 逐 blob 比对 → 只推差异文件（blobs/trees/commits/refs 四步）→ 推完自动复核。
   ⚠️ 凭据是 URL 形式（`https://user:gho_XXX@github.com`），**必须用正则 `gho_[A-Za-z0-9]+` 提取**。
   ⚠️ 本地 `refs/remotes/origin/main` 因此指向本地不存在的对象，`git status` 会一直显示 ahead，属正常。
+  🩸 **用 API 推送必须复刻 git 的两个规范化，否则远端与本地永久不一致**（2026-10-02 踩了两遍）：
+  ① **换行符**：`.gitattributes` 是 `* text=auto eol=lf`，推之前必须 `data.replace(b"\r\n", b"\n")`，
+     否则工作区 CRLF 被原样推上去（表现为 blob 永远对不上）。
+  ② **文件模式**：**Windows 上 `os.access(X_OK)` 对所有文件都返回 True**，
+     会把 `.md`/`.json` 全标成 `100755`。判断可执行位只能靠扩展名（无扩展名才算脚本）。
+  推完**必须逐 blob + 逐 mode 复核**（`git ls-tree -r` 对比远端 tree），不能只看内容 SHA。
 - ⚠️ 本机专属：`wmic` 在沙箱黑名单 → 查进程用 Python ctypes；删 `%APPDATA%` 下文件只能用 PowerShell
   `Remove-Item -LiteralPath`（`rm` 被 safe-delete 守护拦）。本机 6 个 `msedgewebview2.exe` 属 `SearchHost.exe`，
   与本项目无关。
