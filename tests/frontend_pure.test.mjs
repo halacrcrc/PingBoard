@@ -107,6 +107,7 @@ function isNull(actual, msg) {
 const dlg = await loadPure("src/components/AddTargetsDialog.tsx");
 const fmt = await loadPure("src/lib/format.ts");
 const settings = await loadPure("src/components/SettingsDialog.tsx");
+const edlg = await loadPure("src/components/ExportDialog.tsx");
 
 const { expandIpRange, parseBatch, findDuplicateHosts, decideAdd, tableToBatchText } = dlg;
 
@@ -879,6 +880,29 @@ check("shouldIgnoreDeleteKey 返回值恒为布尔（不返回 undefined / 真�
     for (const open of [true, false]) {
       const r = shouldIgnoreDeleteKey(tag, open);
       if (typeof r !== "boolean") throw new Error(`(${tag}, ${open}) 应返回 boolean，实际 ${typeof r}`);
+    }
+  }
+});
+
+/* ---------- 导出对话框「范围」单选：两项永不同色 ---------- */
+
+const { scopeSelected } = edlg;
+
+check("导出范围：任一状态下恰好一项选中（v1.1.9 两按钮同色的回归防护）", () => {
+  // 真实缺陷：v1.1.9 两个按钮的 className 都写成 onlySelected ? chipOn : chipOff，
+  // 表现为「点全部节点 -> 两项都灰」「点仅选中 -> 两项都蓝」，用户看不出选的是哪个。
+  for (const scope of ["all", "selected"]) {
+    const on = ["all", "selected"].filter((id) => scopeSelected(scope, id));
+    eq(on, [scope], "scope=" + scope + " 时应恰好只有 " + scope + " 选中");
+  }
+});
+
+check("导出范围：scopeSelected 恒返回布尔且对自身为 true", () => {
+  for (const scope of ["all", "selected"]) {
+    eq(scopeSelected(scope, scope), true, scope + " 对自身应为 true");
+    for (const id of ["all", "selected"]) {
+      const r = scopeSelected(scope, id);
+      if (typeof r !== "boolean") throw new Error("(" + scope + "," + id + ") 应返回 boolean");
     }
   }
 });

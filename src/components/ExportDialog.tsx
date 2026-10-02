@@ -35,6 +35,22 @@ const FORMATS: { id: ExportFormat; label: string }[] = [
   { id: "html", label: "HTML 报表" },
 ];
 
+/** 范围单选项。刻意用数组 + 单一 className 表达式驱动，不要拆成两个手写按钮：
+ *  v1.1.9 曾把两个按钮的 className 都写成 onlySelected ? chipOn : chipOff，
+ *  结果两项永远同色、用户看不出选的是哪个（aria-checked 仍正确，只有视觉错）。 */
+export type ExportScope = "all" | "selected";
+
+/** 范围项定义（计数在渲染时算，故只存标签与取值） */
+const SCOPES: { id: ExportScope; label: string }[] = [
+  { id: "all", label: "全部节点" },
+  { id: "selected", label: "仅选中" },
+];
+
+/** 某范围项是否处于选中态（纯函数，供测试锁定「两项永不同色」） */
+export function scopeSelected(scope: ExportScope, id: ExportScope): boolean {
+  return scope === id;
+}
+
 const FILTERS: { id: ExportFilter; desc: string }[] = [
   { id: "none_loss", desc: "全程一次都没丢包" },
   { id: "all_failed", desc: "所有 ping 一次都没成功" },
@@ -62,7 +78,8 @@ const ExportDialog: React.FC<ExportDialogProps> = ({
 }) => {
   const [format, setFormat] = React.useState<ExportFormat>("csv");
   const [filter, setFilter] = React.useState<ExportFilter>("all");
-  const [onlySelected, setOnlySelected] = React.useState(false);
+  const [scope, setScope] = React.useState<ExportScope>("all");
+  const onlySelected = scope === "selected";
 
   // 每次打开时把草稿复位到默认「全部 / 不过滤 / CSV」。
   // ⚠️ 用 wasOpenRef 而不是把 open 放进依赖：open 翻转时初始化一次即可，
@@ -74,7 +91,7 @@ const ExportDialog: React.FC<ExportDialogProps> = ({
     if (!justOpened) return;
     setFormat("csv");
     setFilter("all");
-    setOnlySelected(false);
+    setScope("all");
   });
 
   // Esc 关闭
@@ -129,24 +146,23 @@ const ExportDialog: React.FC<ExportDialogProps> = ({
           <div className="flex items-center gap-2 mb-1">
             <span className="w-14 shrink-0 text-slate-600 dark:text-slate-300">范围</span>
             <div className="flex items-center gap-1.5" role="radiogroup" aria-label="导出范围">
-              <button
-                className={onlySelected ? chipOn : chipOff}
-                role="radio"
-                aria-checked={!onlySelected}
-                onClick={() => setOnlySelected(false)}
-              >
-                全部节点（{targets.length}）
-              </button>
-              <button
-                className={onlySelected ? chipOn : chipOff}
-                role="radio"
-                aria-checked={onlySelected}
-                disabled={selected.size === 0}
-                title={selected.size === 0 ? "尚未选中任何主机" : undefined}
-                onClick={() => setOnlySelected(true)}
-              >
-                仅选中（{selected.size}）
-              </button>
+              {SCOPES.map((s) => {
+                const on = scopeSelected(scope, s.id);
+                const cnt = s.id === "all" ? targets.length : selected.size;
+                return (
+                  <button
+                    key={s.id}
+                    className={on ? chipOn : chipOff}
+                    role="radio"
+                    aria-checked={on}
+                    disabled={s.id === "selected" && selected.size === 0}
+                    title={s.id === "selected" && selected.size === 0 ? "尚未选中任何主机" : undefined}
+                    onClick={() => setScope(s.id)}
+                  >
+                    {s.label}（{cnt}）
+                  </button>
+                );
+              })}
             </div>
           </div>
 
