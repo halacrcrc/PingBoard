@@ -1,5 +1,5 @@
 // 展示层格式化工具（纯函数）
-import type { EventKind, Status } from "../types";
+import type { EventKind, Status, TargetState } from "../types";
 
 /** 格式化延迟（毫秒），保留 1 位小数；null 显示为 "-" */
 export function fmtMs(v: number | null | undefined): string {
@@ -187,4 +187,57 @@ export function fontFamilyStyle(family: string | null | undefined): string {
 export function currentZoomFactor(): number {
   const z = parseFloat(document.documentElement.style.zoom);
   return Number.isFinite(z) && z > 0 ? z : 1;
+}
+
+/* ===================== 报表导出筛选（与 Rust `export.rs` 对齐） ===================== */
+
+/** 报表导出筛选口径（对应 Rust `export::ExportFilter`） */
+export type ExportFilter = "all" | "none_loss" | "all_failed";
+
+/**
+ * 判定单个节点是否命中导出筛选口径。
+ *
+ * ⚠️ 与 Rust `export::matches_filter` 是**同一判定的两个实现**：
+ * 本函数只用于对话框里的「命中台数」预览，**不参与写文件**；
+ * 导出结果的唯一权威是后端。改判据必须两侧同时改
+ * （两侧测试用同一组边界用例锁定：`sent>0` 零丢包 / 部分丢包 / 全失败 / `sent==0`）。
+ *
+ * 🩸 两种口径都要求 `sent > 0`：`sent === 0` 表示从未 ping 或统计已被清空，
+ * 此时 `received` 与 `failed` 同为 0，且后端 `stats::loss_pct` 对 `sent === 0` 定义为 `0.0`。
+ * 若只判 `failed === 0`，**从未开始的主机会被误当成「零丢包」**。
+ * 在 `sent > 0` 的前提下两种口径互斥（一个要求 `received === sent`，一个要求 `received === 0`）。
+ */
+export function matchesExportFilter(t: TargetState, f: ExportFilter): boolean {
+  switch (f) {
+    case "all":
+      return true;
+    case "none_loss":
+      return t.sent > 0 && t.failed === 0;
+    case "all_failed":
+      return t.sent > 0 && t.received === 0;
+  }
+}
+
+/** 筛选口径中文名（与 Rust `export::filter_label` 保持一致） */
+export function exportFilterLabel(f: ExportFilter): string {
+  switch (f) {
+    case "all":
+      return "不过滤";
+    case "none_loss":
+      return "零丢包";
+    case "all_failed":
+      return "全部未成功";
+  }
+}
+
+/** 筛选口径的一句话判定式说明（与 Rust `export::filter_hint` 语义一致） */
+export function exportFilterHint(f: ExportFilter): string {
+  switch (f) {
+    case "all":
+      return "导出全部节点，与原导出行为一致";
+    case "none_loss":
+      return "仅 sent>0 且 failed=0：全程一次都没丢包";
+    case "all_failed":
+      return "仅 sent>0 且 received=0：所有 ping 一次都没成功";
+  }
 }

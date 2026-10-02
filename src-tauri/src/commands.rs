@@ -113,17 +113,23 @@ pub async fn resolve_host(host: String) -> Result<String, String> {
 }
 
 /// 导出报表到指定路径
+///
+/// - `ids`：`Some` 仅导出这些 id，`None` 导出全部（**语义未变**）
+/// - `filter`：`all`(默认/缺省) / `none_loss`(零丢包) / `all_failed`(全部未成功)。
+///   **缺省或 `null` 等价于 `all`**，即筛选功能上线前的原始行为，保证向后兼容。
 #[tauri::command]
 pub async fn export_report(
     state: State<'_, AppState>,
     path: String,
     format: String,
     ids: Option<Vec<u64>>,
+    filter: Option<String>,
 ) -> Result<(), String> {
     // ⚠️ 只取主机列表，必须走无副作用的 `export_targets()`：
     // `snapshot()` 会 drain_pending()，导出一次报表就会吃掉前端尚未消费的事件增量。
+    let filter = export::parse_filter(filter.as_deref())?;
     let targets = state.export_targets(ids.as_deref());
-    export::write_report(&path, &format, &targets)
+    export::write_report(&path, &format, &targets, filter)
 }
 
 /// 取走启动期的一次性提示（配置损坏 / 已备份 / 抢救结果），**取走即清空**。

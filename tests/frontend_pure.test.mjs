@@ -883,6 +883,99 @@ check("shouldIgnoreDeleteKey 返回值恒为布尔（不返回 undefined / 真�
   }
 });
 
+/* ---------- 报表导出筛选（镜像 Rust export::matches_filter） ---------- */
+
+const { matchesExportFilter, exportFilterLabel, exportFilterHint } = fmt;
+
+/** 构造一个最小 TargetState（只需统计字段参与判定） */
+const mkTarget = (o = {}) => ({
+  id: 1, name: "n", host: "h", enabled: true, resolved_ip: null, status: "idle",
+  sent: 0, received: 0, failed: 0,
+  last_rtt_ms: null, min_rtt_ms: null, max_rtt_ms: null, avg_rtt_ms: null,
+  sum_rtt_ms: 0, ttl: null, consecutive_fail: 0, loss_pct: 0,
+  last_success_ts: null, history: [], running: false, last_error: null, events_on: false,
+  ...o,
+});
+
+/**
+ * 与 Rust `export::tests::filter_targets_sample()` **逐台同构**的四台样本。
+ * 两侧用同一组数据判定，才能保证「菜单显示的命中台数」与「实际导出的行」一致。
+ */
+const filterSample = () => [
+  mkTarget({ id: 1, name: "零丢包",   status: "ok",     sent: 4, received: 4, failed: 0, loss_pct: 0,   last_success_ts: 1 }),
+  mkTarget({ id: 2, name: "部分丢包", status: "ok",     sent: 4, received: 3, failed: 1, loss_pct: 25 }),
+  mkTarget({ id: 3, name: "全部失败", status: "timeout", sent: 2, received: 0, failed: 2, loss_pct: 100 }),
+  mkTarget({ id: 4, name: "未开始",   status: "idle",   sent: 0, received: 0, failed: 0, loss_pct: 0 }),
+];
+
+const names = (ts, f) => ts.filter((t) => matchesExportFilter(t, f)).map((t) => t.name);
+
+check("导出筛选：零丢包只命中全程无失败的那台", () => {
+  eq(names(filterSample(), "none_loss"), ["零丢包"]);
+});
+
+check("导出筛选：全部未成功只命中 received=0 的那台", () => {
+  eq(names(filterSample(), "all_failed"), ["全部失败"]);
+});
+
+check("导出筛选：部分丢包（25%）两种口径都不命中", () => {
+  const partial = filterSample()[1];
+  eq(matchesExportFilter(partial, "none_loss"), false, "有失败即非零丢包");
+  eq(matchesExportFilter(partial, "all_failed"), false, "收到过包即非全部未成功");
+});
+
+check("导出筛选：sent=0（未开始/已清空统计）两种口径都不命中 🩸", () => {
+  // 前提：后端 stats::loss_pct 对 sent==0 定义为 0.0，
+  // 若判据写成 failed===0 或 loss_pct===0，未开始的主机会被误判成「零丢包」。
+  const idle = filterSample()[3];
+  eq(idle.sent, 0, "前提：sent 必须为 0");
+  eq(idle.loss_pct, 0, "前提：sent=0 时 loss_pct 也是 0");
+  eq(idle.failed, 0, "前提：failed 也是 0");
+  eq(matchesExportFilter(idle, "none_loss"), false, "未开始不得算零丢包");
+  eq(matchesExportFilter(idle, "all_failed"), false, "未开始不得算全部未成功");
+});
+
+check("导出筛选：sent=0 的主机一旦真的 ping 过（全失败）即可命中「全部未成功」", () => {
+  const probed = mkTarget({ sent: 1, received: 0, failed: 1, loss_pct: 100, status: "timeout" });
+  eq(matchesExportFilter(probed, "all_failed"), true);
+  eq(matchesExportFilter(probed, "none_loss"), false);
+});
+
+check("导出筛选：sent>0 时两种口径互斥（不得命中同一台）", () => {
+  const ts = filterSample();
+  const a = names(ts, "none_loss");
+  const b = names(ts, "all_failed");
+  for (const n of a) {
+    if (b.includes(n)) throw new Error(`「${n}」同时命中两种口径，判据互斥性被破坏`);
+  }
+});
+
+check("导出筛选：all 恒为 true（不筛选 = 原导出行为）", () => {
+  eq(names(filterSample(), "all").length, 4, "不过滤时必须导出全部 4 台，含未开始的那台");
+});
+
+check("导出筛选：判据只依赖统计字段，不受 status / loss_pct 取值影响", () => {
+  // 同一组统计量，status 与 loss_pct 无论怎么写都不该改变判定结果
+  const base = { sent: 5, received: 5, failed: 0 };
+  for (const status of ["ok", "timeout", "failed", "idle", "resolving"]) {
+    for (const loss_pct of [0, 99.9]) {
+      const t = mkTarget({ ...base, status, loss_pct });
+      eq(matchesExportFilter(t, "none_loss"), true, `status=${status} loss=${loss_pct} 应仍判为零丢包`);
+      eq(matchesExportFilter(t, "all_failed"), false, `status=${status} loss=${loss_pct} 不应判为全部未成功`);
+    }
+  }
+});
+
+check("导出筛选：文案 label / hint 三档互不相同且非空", () => {
+  const labels = ["all", "none_loss", "all_failed"].map(exportFilterLabel);
+  const hints = ["all", "none_loss", "all_failed"].map(exportFilterHint);
+  for (const s of [...labels, ...hints]) {
+    if (typeof s !== "string" || s.length === 0) throw new Error("文案不得为空");
+  }
+  eq(new Set(labels).size, 3, "三档 label 必须互不相同");
+  eq(new Set(hints).size, 3, "三档 hint 必须互不相同");
+});
+
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

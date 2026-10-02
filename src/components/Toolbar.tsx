@@ -19,6 +19,8 @@ export interface ToolbarProps {
   onClearList: () => void;
   onOpenSettings: () => void;
   onExport: (format: "csv" | "txt" | "html", onlySelected: boolean) => void;
+  /** 打开「导出报表」对话框（可选范围 + 筛选口径 + 格式，带命中台数预览） */
+  onOpenExportDialog: () => void;
   selectionCount: number;
   onStartSelected: () => void;
   onStopSelected: () => void;
@@ -60,6 +62,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onClearList,
   onOpenSettings,
   onExport,
+  onOpenExportDialog,
   selectionCount,
   onStartSelected,
   onStopSelected,
@@ -189,6 +192,21 @@ const Toolbar: React.FC<ToolbarProps> = ({
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40" disabled={selectionCount === 0} onClick={() => handleExport("csv", true)}>选中 → CSV</button>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40" disabled={selectionCount === 0} onClick={() => handleExport("txt", true)}>选中 → TXT</button>
             <button className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40" disabled={selectionCount === 0} onClick={() => handleExport("html", true)}>选中 → HTML</button>
+            <div className="px-3 py-1 mt-1 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-600 pt-1">
+              按结果筛选
+            </div>
+            {/* 筛选口径 × 格式 = 6 种组合，加上「范围」维度会撑爆下拉，
+                故统一收进「导出报表」对话框（正交排布 + 命中台数预览）。
+                这一组是**新增入口**，上面两组原有菜单项一字未改。 */}
+            <button
+              className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700"
+              onClick={() => {
+                setExportOpen(false);
+                onOpenExportDialog();
+              }}
+            >
+              零丢包 / 全部未成功…
+            </button>
           </div>
         </>
       )}

@@ -5,7 +5,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { EventLevel, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
-import { fmtTime, fontFamilyStyle, isUnreadKind, zoomStyle } from "./lib/format";
+import {
+  exportFilterLabel,
+  fmtTime,
+  fontFamilyStyle,
+  isUnreadKind,
+  zoomStyle,
+  type ExportFilter,
+} from "./lib/format";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
 import TargetTable, { type SortKey } from "./components/TargetTable";
@@ -14,6 +21,7 @@ import DetailPanel from "./components/DetailPanel";
 import AddTargetsDialog from "./components/AddTargetsDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
+import ExportDialog, { type ExportFormat } from "./components/ExportDialog";
 
 /** 默认设置（与 Rust 侧 PingSettings::default 保持一致） */
 const DEFAULT_SETTINGS: PingSettings = {
@@ -111,6 +119,7 @@ const App: React.FC = () => {
   const [confirmClear, setConfirmClear] = React.useState(false);
   const [confirmClearLogs, setConfirmClearLogs] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [showExport, setShowExport] = React.useState(false);
 
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   /** 保存 ping-snapshot 的取消订阅函数，卸载时判空 + 容错调用 */
@@ -475,17 +484,33 @@ const App: React.FC = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, requestDeleteSelected]);
 
-  const handleExport = async (format: "csv" | "txt" | "html", onlySelected: boolean) => {
+  /**
+   * 导出报表。
+   *
+   * `filter` 缺省为 `"all"`，此时请求体与筛选功能上线前完全一致
+   * （默认文件名也仍是 `pingboard-report.<ext>`），保证原有导出流程不受影响。
+   */
+  const handleExport = async (
+    format: ExportFormat,
+    onlySelected: boolean,
+    filter: ExportFilter = "all"
+  ) => {
     const ids = onlySelected ? [...selected] : null;
     try {
       const ext = format;
+      // 仅在带筛选时给默认文件名加后缀，避免与既有报表同名混淆
+      const suffix =
+        filter === "none_loss" ? "-no-loss" : filter === "all_failed" ? "-all-failed" : "";
       const path = await save({
-        defaultPath: `pingboard-report.${ext}`,
+        defaultPath: `pingboard-report${suffix}.${ext}`,
         filters: [{ name: `${format.toUpperCase()} 文件`, extensions: [ext] }],
       });
       if (!path) return;
-      await api.exportReport(path, format, ids);
-      showToast(`已导出：${path}`);
+      setShowExport(false);
+      await api.exportReport(path, format, ids, filter);
+      showToast(
+        filter === "all" ? `已导出：${path}` : `已导出（${exportFilterLabel(filter)}）：${path}`
+      );
     } catch (e) {
       showToast(`导出失败：${String(e)}`);
     }
@@ -602,6 +627,7 @@ const App: React.FC = () => {
         onClearList={handleClearList}
         onOpenSettings={() => setShowSettings(true)}
         onExport={handleExport}
+        onOpenExportDialog={() => setShowExport(true)}
         selectionCount={selected.size}
         onStartSelected={handleStartSelected}
         onStopSelected={handleStopSelected}
@@ -678,6 +704,15 @@ const App: React.FC = () => {
       </div>
 
       <StatusBar snapshot={snapshot} />
+
+      {/* 导出报表（可选范围 + 筛选口径 + 格式）。默认路径不变，故仍从工具栏「导出 ▾」进入 */}
+      <ExportDialog
+        open={showExport}
+        targets={snapshot.targets}
+        selected={selected}
+        onClose={() => setShowExport(false)}
+        onExport={handleExport}
+      />
 
       <AddTargetsDialog
         open={showAdd}

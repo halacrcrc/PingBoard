@@ -1,6 +1,7 @@
 // Tauri invoke 命令封装：与 Rust 侧 #[tauri::command] 一一对应
 import { invoke } from "@tauri-apps/api/core";
 import type { ImportPayload, LogEvent, PingSettings, Snapshot, TargetEntry } from "../types";
+import type { ExportFilter } from "./format";
 
 /** 获取当前完整快照（目标列表 + 设置 + 汇总统计） */
 export const getState = (): Promise<Snapshot> => invoke<Snapshot>("get_state");
@@ -45,12 +46,16 @@ export const updateSettings = (settings: PingSettings): Promise<void> =>
 export const resolveHost = (host: string): Promise<string> =>
   invoke<string>("resolve_host", { host });
 
-/** 导出报表；ids 为 null 表示导出全部 */
+/**
+ * 导出报表；ids 为 null 表示导出全部。
+ * `filter` 缺省或 "all" 等价于不筛选 —— 与筛选功能上线前的行为完全一致。
+ */
 export const exportReport = (
   path: string,
   format: string,
-  ids: number[] | null
-): Promise<void> => invoke<void>("export_report", { path, format, ids });
+  ids: number[] | null,
+  filter: ExportFilter = "all"
+): Promise<void> => invoke<void>("export_report", { path, format, ids, filter });
 
 /** 获取配置文件路径 */
 export const getConfigPath = (): Promise<string> => invoke<string>("get_config_path");
