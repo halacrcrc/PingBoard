@@ -15,7 +15,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 
 | 项 | 值 |
 |---|---|
-| 最新发布版本 | **v1.1.8**（tag `v1.1.8` → commit `bc2bdc9`） |
+| 最新发布版本 | **v1.1.9**（tag `v1.1.9` → commit `aa8f883`）—— 三包已发布，见 https://github.com/halacrcrc/PingBoard/releases/tag/v1.1.9 |
 | 当前开发版本 | 🟡 **v1.1.9-dev**（批次 5 报表导出筛选）—— 四处版本号已改 `1.1.9`，**尚未提交、未发版** |
 | 当前 HEAD（仓库侧） | `2bf9a1d`，工作区有本批次的 9 改 + 3 新（未提交） |
 | Rust 测试 | `cargo test --lib` = **154 passed / 0 failed**（143 基线 + 批次 5 的 11 条）；`npx tsc --noEmit` = 0 error；`npm test` = 90 passed |

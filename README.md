@@ -51,7 +51,7 @@
 > PE 机器类型正确）。ARM64 Windows 设备**不装它也能用**：x64 包可通过 Windows 自带模拟运行。
 > 安装程序本体为 x86 属正常现象（ARM 机器靠系统模拟运行安装器，装出的应用才是原生 ARM64）。
 
-> v1.1.9 三种包随本版发布，发布后可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
+> v1.1.9 三种包**已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/tag/v1.1.9) 页下载。
 > 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
 > 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
