@@ -11,6 +11,10 @@ import ConfirmDialog from "./ConfirmDialog";
 
 export interface FolderSidebarProps {
   folders: FolderEntry[];
+  /** 各文件夹实时台数（key 0 = 临时区），由 `folderCounts(snapshot.targets)` 得出。
+   *  🩸 刻意**不用** `folders[].count`：那份数据只在显式 refreshFolders() 时刷新，
+   *  漏一个调用点就会出现「清空列表后台数不变」的脏数据。 */
+  counts?: Map<number, number>;
   /** 当前勾选的文件夹 id 集合；空 = 全部 */
   scope: ReadonlySet<number>;
   onToggle: (id: number) => void;
@@ -52,6 +56,7 @@ interface EditState {
 
 const FolderSidebar: React.FC<FolderSidebarProps> = ({
   folders,
+  counts,
   scope,
   onToggle,
   onClearAll,
@@ -72,7 +77,9 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
     if (edit.id === null) setEdit({ ...edit, name: "", color: "sky" });
   });
 
-  const total = folders.reduce((a, f) => a + f.count, 0);
+  // 实时台数：优先用 counts（来自快照），无 counts 时退回 listFolders 的 count
+  const countOf = (id: number) => counts?.get(id) ?? 0;
+  const total = folders.reduce((a, f) => a + countOf(f.folder.id), 0);
   const allChecked = scope.size === 0;
   return (
     <div className="w-48 max-[1199px]:w-36 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
@@ -115,7 +122,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
               <span className="flex-1 text-[12.5px] truncate text-slate-700 dark:text-slate-200">
                 {f.folder.name || "(未命名)"}
               </span>
-              <span className="text-[11px] tabular-nums text-slate-500 dark:text-slate-400 shrink-0">{f.count}</span>
+              <span className="text-[11px] tabular-nums text-slate-500 dark:text-slate-400 shrink-0">{countOf(f.folder.id)}</span>
               {!isTemp && (
                 <button
                   className="w-4 h-4 shrink-0 text-[11px] leading-none text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"

@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { exportScopeIds, filterByFolderScope, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
+import { exportScopeIds, filterByFolderScope, folderCounts, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -542,6 +542,14 @@ const App: React.FC = () => {
   /* ------------------------- 派生数据 ------------------------- */
 
   // v1.1.10：过滤链 = 侧边栏范围 ∩ 搜索关键词（顺序固定，见 folder-design.md C5）
+  // 真实存在的文件夹 id 集合（**排除临时区哨兵 0** —— 后端 list_folders 会
+  // 补一个 id=0 的「临时区」项，那不是真文件夹）。用于让 folderCounts
+  // 把失效 folder_id 归入临时区，与后端 folder_counts 同口径。
+  const realFolderIds = React.useMemo(
+    () => new Set(folders.filter((f) => f.folder.id !== 0).map((f) => f.folder.id)),
+    [folders]
+  );
+
   const scopedTargets = React.useMemo(
     () => filterByFolderScope(snapshot.targets, folderScope),
     [snapshot.targets, folderScope]
@@ -666,6 +674,7 @@ const App: React.FC = () => {
       <div className="flex-1 flex min-h-0">
       <FolderSidebar
         folders={folders}
+        counts={folderCounts(snapshot.targets, realFolderIds)}
         scope={folderScope}
         disabled={false}
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}

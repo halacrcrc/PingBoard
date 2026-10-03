@@ -1198,6 +1198,64 @@ check("侧边栏：新建文件夹后勾选它，临时区不得被连带勾上"
   const checked = [0, 1].filter((id) => scope.has(id));
   eq(checked, [1], "只能勾中新文件夹");
 });
+/* ---------- 侧边栏台数实时统计（v1.1.10 bug 回归） ---------- */
+
+const { folderCounts } = fmt;
+
+check("台数：folder_id 为 null 计入临时区(key 0) 🩸", () => {
+  const c = folderCounts([{ folder_id: null }, { folder_id: null }]);
+  eq(c.get(0), 2, "两台都在临时区");
+  eq(c.size, 1, "不应凭空产生其它 key");
+});
+
+check("台数：清空列表后临时区归零（回归：曾不刷新）", () => {
+  // 用户报告的 bug：清空 IP 后侧边栏数字不变。
+  // 根因是台数取自 listFolders 的 count，而那份数据只在 onAdded 时刷新。
+  const before = folderCounts([{ folder_id: null }, { folder_id: null }]);
+  eq(before.get(0), 2);
+  const after = folderCounts([]);          // 清空后 targets 为空
+  eq(after.get(0) ?? 0, 0, "清空后临时区必须是 0，不得沿用旧值");
+});
+
+check("台数：按文件夹分别统计", () => {
+  const c = folderCounts([
+    { folder_id: 1 }, { folder_id: 1 }, { folder_id: 2 }, { folder_id: null },
+  ]);
+  eq(c.get(1), 2, "文件夹1");
+  eq(c.get(2), 1, "文件夹2");
+  eq(c.get(0), 1, "临时区");
+  eq(c.size, 3);
+});
+
+check("台数：失效的 folder_id 归入临时区（与后端 folder_counts 同口径）", () => {
+  // 配置被手改产生的孤儿，主机归临时区，不得凭空消失
+  const valid = new Set([1, 2]);
+  const c = folderCounts([{ folder_id: 4242 }, { folder_id: null }], valid);
+  eq(c.get(0), 2, "孤儿 + 临时区原生 = 2");
+  eq(c.get(4242), undefined, "不得为孤儿生成独立计数");
+});
+
+check("台数：合法 folder_id 不会被误回落（传入 validFolderIds 时）", () => {
+  const valid = new Set([1, 2]);
+  const c = folderCounts([{ folder_id: 1 }, { folder_id: 2 }], valid);
+  eq(c.get(1), 1);
+  eq(c.get(2), 1);
+  eq(c.get(0), undefined, "合法文件夹不得被算进临时区");
+});
+
+check("台数：未传 validFolderIds 时按原样统计（向后兼容）", () => {
+  const c = folderCounts([{ folder_id: 7 }]);
+  eq(c.get(7), 1, "不传集合时不做回落判定");
+});
+
+check("台数：结果与 listFolders 的 count 在静态数据上必须一致", () => {
+  // 两套算法（后端 folder_counts / 前端 folderCounts）口径必须相同，
+  // 否则切换到实时统计后会出现台数跳变。
+  const ts = [{ folder_id: 1 }, { folder_id: 1 }, { folder_id: null }];
+  const c = folderCounts(ts);
+  eq(c.get(1), 2);
+  eq(c.get(0), 1);
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

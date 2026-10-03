@@ -311,3 +311,37 @@ export function exportScopeIds(
   const s = scope as ReadonlySet<number>;
   return targets.filter((t) => s.has(t.folder_id ?? 0)).map((t) => t.id);
 }
+/**
+ * 按文件夹实时统计台数（key 0 = 临时区）。
+ *
+ * 🩸 为什么不用 `listFolders` 返回的 `count`：那份 count 只有在**显式调用
+ * `refreshFolders()`** 时才更新，而刷新点极易漏 —— 漏一个就会出现
+ * 「清空列表后侧边栏台数不变」这类脏数据（v1.1.10 实际踩过）。
+ *
+ * 快照 `targets` 本就带 `folder_id`，且随 ping 轮询自动刷新，
+ * 因此台数**从 targets 实时算**可让任何目标增删改都自动同步，
+ * 不依赖「记得在每个操作点调 refreshFolders」。
+ *
+ * ⚠️ 失效的 folder_id（配置被手改等）归入临时区，与后端 `folder_counts` 同口径。
+ */
+export function folderCounts(
+  targets: ReadonlyArray<{ folder_id: number | null }>,
+  validFolderIds?: ReadonlySet<number>
+): Map<number, number> {
+  const m = new Map<number, number>();
+  const bump = (k: number) => m.set(k, (m.get(k) ?? 0) + 1);
+  for (const t of targets) {
+    const raw = t.folder_id;
+    if (raw === null || raw === undefined) {
+      bump(0);
+    } else if (validFolderIds && !validFolderIds.has(raw)) {
+      // 🩸 失效的 folder_id（配置被手改等）必须归入临时区，与后端
+      // `folder_counts` + `list_folders` 同口径。前端无法自行区分
+      // 「孤儿 id」与「真实但恰好同号的 id」，故需调用方传入合法 id 集合。
+      bump(0);
+    } else {
+      bump(raw);
+    }
+  }
+  return m;
+}
