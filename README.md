@@ -43,15 +43,15 @@
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.1.9_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.1.9_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.1.9_arm64-setup.exe`（**ARM64 实验版**） | ≈ 2.0 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
+| `PingBoard_1.1.10_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.0 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.1.10_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.1.10_arm64-setup.exe`（**ARM64 实验版**） | ≈ 2.0 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
 
 > ⚠️ **ARM64 包未经真机测试**（开发机为 x64，无法运行 ARM64 程序验证；仅验证了编译通过与
 > PE 机器类型正确）。ARM64 Windows 设备**不装它也能用**：x64 包可通过 Windows 自带模拟运行。
 > 安装程序本体为 x86 属正常现象（ARM 机器靠系统模拟运行安装器，装出的应用才是原生 ARM64）。
 
-> v1.1.9 三种包**已发布**，可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/tag/v1.1.9) 页下载。
+> v1.1.10 三种包随本版发布，发布后可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
 > 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
 
 > 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
@@ -74,8 +74,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.1.9_x64-setup.exe /S                     :: 安装到默认目录
-PingBoard_1.1.9_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.1.10_x64-setup.exe /S                     :: 安装到默认目录
+PingBoard_1.1.10_x64-setup.exe /S /D=C:\Tools\PingBoard   :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                     :: 静默卸载
 ```
 
@@ -276,13 +276,13 @@ npm run build
 ```bash
 cd src-tauri
 cargo check
-cargo test --lib        # 154 项（v1.1.9）
+cargo test --lib        # 172 项（v1.1.10）
 ```
 
 ### 前端纯函数测试
 
 ```bash
-npm test                 # 90 项（v1.1.9）
+npm test                 # 112 项（v1.1.10）
 ```
 
 > 用 esbuild 把真实 TSX/TS 转译后加载，把 React / Tauri 等运行时打桩为空模块，
@@ -320,7 +320,7 @@ npx tauri icon docs/app-icon.png
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.9_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.1.10_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
@@ -440,6 +440,20 @@ pinginfo/
 
 > 逐条对比 v1.1.8 与 v1.1.9 的完整差异（含兼容性判断与升级建议）见
 > [`docs/release-notes-1.1.9.md`](docs/release-notes-1.1.9.md)。
+
+### v1.1.10 — 主机文件夹 + 统计持久化
+
+- **新增：主机文件夹。** 侧边栏可按机房 / 区域 / 用途把主机分组管理，支持**多选**
+  （不勾选 = 显示全部）。新增、批量粘贴、文件导入都能在添加时直接选「归入」哪个文件夹。
+- **新增：统计持久化。** 关闭应用再打开，**多 ping 数据默认保留**（此前关闭即丢失）。
+  统计单独存文件，升级或改配置都不影响。
+- **「清空列表」改为只清临时区。** 文件夹里的 IP **不再被一键清空**；
+  确认框会明确显示「文件夹内的 N 个 IP 不受影响」。要删文件夹内的主机，
+  请用侧边栏的「删除文件夹」。
+- **导出范围跟随侧边栏。** 在侧边栏选中「机房A」再导出，「全部节点」导出的就是机房A。
+  未勾选任何文件夹时行为与旧版完全一致。
+- **修复：导出对话框「范围」两项同色** —— 此前「全部节点」与「仅选中」按钮颜色相同，
+  看不出选中的是哪个。
 
 ### v1.1.9 — 配置韧性加固 + 报表导出按结果筛选
 

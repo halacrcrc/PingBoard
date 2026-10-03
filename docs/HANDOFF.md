@@ -51,7 +51,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 - 安装包通过 **Release 附件**分发（见 `github-push-and-release` 技能），仓库只管源码。
 推历史包时用 `git add <具体路径>`，**永远不要在仓库根裸跑 `git add -A`**。
 
-`src-tauri/tauri.conf.json` **基线 md5 = `4048afd632b3cc649f5904b36727a69e`（v1.1.9 起，两侧必须始终一致）**。
+`src-tauri/tauri.conf.json` **基线 md5 = `f180c1189ea47f41869b90ba86b4f5a2`（v1.1.10 起，两侧必须始终一致）**。
 ⚠️ **提版本后基线必然变化，必须重记并同步两侧**（v1.1.8 时期的旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。
 打包变体时只改**构建侧 D 盘**的 `webviewInstallMode`，构造完立刻还原。
 
