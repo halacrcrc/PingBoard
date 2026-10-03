@@ -579,13 +579,22 @@ impl AppState {
     }
 
     pub fn add_targets(&self, entries: Vec<TargetEntry>) -> Result<Vec<u64>, String> {
-        let mut ids: Vec<u64> = Vec::new();
-        {
-            let mut list = self.inner.targets.lock().unwrap();
+        // ① 先**全量校验**再落库（两阶段）。
+        //
+        // 🩸 校验必须在循环外：若边校验边插入，第 3 条遇到无效 folder_id 就返回 Err，
+        // 前两条已经进 targets 了 —— 留下半批次脏状态，而用户看到的是「部分成功」。
+        // 与 `move_targets` 同口径（那里对无效 folder_id 报错，有测试锁定）。
+        //
+        // 校验存在的意义：原先这里不校验，无效 id 被静默接受并持久化进 config.json
+        // 成孤儿，界面又按「回落临时区」显示 —— 用户看到的正是
+        // 「明明选了文件夹，却进了临时区」，全程零提示。
+        let prepared: Vec<(String, String, Option<u64>)> = {
+            let folders = self.inner.folders.lock().unwrap();
+            let mut v: Vec<(String, String, Option<u64>)> = Vec::with_capacity(entries.len());
             for e in entries {
                 let host = e.host.trim().to_string();
                 if host.is_empty() {
-                    continue;
+                    continue; // 空主机名沿用原语义：跳过而非报错
                 }
                 let name_raw = e.name.trim();
                 let name = if name_raw.is_empty() {
@@ -593,20 +602,40 @@ impl AppState {
                 } else {
                     name_raw.to_string()
                 };
+                // `Some(0)` 归一为临时区：0 是后端 list_folders 固定用的临时区哨兵，
+                // 不是真实文件夹 id（真实文件夹 id 从 1 开始）。
+                let folder_id = match e.folder_id {
+                    None | Some(0) => None,
+                    Some(fid) if folders.iter().any(|f| f.id == fid) => Some(fid),
+                    Some(fid) => {
+                        return Err(format!(
+                            "目标文件夹不存在（id={}），请重新打开「添加主机」窗口再选一次",
+                            fid
+                        ))
+                    }
+                };
+                v.push((name, host, folder_id));
+            }
+            v
+        };
+
+        if prepared.is_empty() {
+            return Err("没有可添加的有效目标".to_string());
+        }
+
+        // ② 落库。folder_id 已在 ① 校验过，这里直接透传。
+        let mut ids: Vec<u64> = Vec::with_capacity(prepared.len());
+        {
+            let mut list = self.inner.targets.lock().unwrap();
+            for (name, host, folder_id) in prepared {
                 let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
                 // 🩸 必须透传 folder_id：原先调 `TargetState::new` 会把它硬编码成 None，
                 // 导致「添加主机」里选了文件夹却仍进临时区。
                 list.push(Arc::new(Mutex::new(TargetState::new_in_folder(
-                    id,
-                    name,
-                    host,
-                    e.folder_id,
+                    id, name, host, folder_id,
                 ))));
                 ids.push(id);
             }
-        }
-        if ids.is_empty() {
-            return Err("没有可添加的有效目标".to_string());
         }
         if self.inner.running.load(Ordering::SeqCst) {
             // 运行中新目标自动开始；若超过线程上限则忽略本次自动启动
@@ -1467,6 +1496,82 @@ mod tests {
         assert_eq!(t.folder_id, None, "new() 必须仍默认临时区，不得破坏既有调用点");
         let t2 = TargetState::new_in_folder(2, "n".into(), "h".into(), Some(7));
         assert_eq!(t2.folder_id, Some(7));
+    }
+
+    /// 🩸🩸 `add_targets` 必须拒绝**不存在的 folder_id**（与 `move_targets` 同口径）。
+    ///
+    /// 此前不校验：前端选了一个已被删除的文件夹时，主机被静默挂到不存在的
+    /// 文件夹上、持久化进 config.json 成孤儿，界面又按「回落临时区」显示 ——
+    /// 用户看到的正是「明明选了文件夹，却进了临时区」，全程零提示。
+    #[test]
+    fn qa_v110_add_targets_rejects_unknown_folder() {
+        let st = AppState::new();
+        let a = st.create_folder("机房A", "sky").unwrap();
+        let err = st
+            .add_targets(vec![TargetEntry {
+                name: "h".into(),
+                host: "10.0.0.1".into(),
+                folder_id: Some(9999),
+            }])
+            .unwrap_err();
+        assert!(
+            err.contains("文件夹不存在") || err.contains("不存在"),
+            "错误信息应明确指出文件夹不存在：{}",
+            err
+        );
+        assert_eq!(st.target_states().len(), 0, "被拒时不得留下任何目标");
+        assert!(a > 0, "前提：真实文件夹已建");
+    }
+
+    /// 🩸 批次原子性：一条无效 folder_id 必须让**整批**失败，
+    /// 不得留下「前几条已插入、后一条报错」的半批次脏状态。
+    #[test]
+    fn qa_v110_add_targets_batch_is_atomic() {
+        let st = AppState::new();
+        let a = st.create_folder("机房A", "sky").unwrap();
+        let err = st
+            .add_targets(vec![
+                TargetEntry { name: "ok1".into(), host: "10.0.0.1".into(), folder_id: Some(a) },
+                TargetEntry { name: "ok2".into(), host: "10.0.0.2".into(), folder_id: None },
+                TargetEntry { name: "bad".into(), host: "10.0.0.3".into(), folder_id: Some(8888) },
+            ])
+            .unwrap_err();
+        assert!(err.contains("不存在"), "应报错：{}", err);
+        assert_eq!(
+            st.target_states().len(),
+            0,
+            "🩸 整批必须回滚：前两条合法条目也不得残留"
+        );
+    }
+
+    /// `Some(0)` 必须归一为临时区：0 是 list_folders 的临时区哨兵，不是真实文件夹。
+    /// 若不归一，`folder_id = Some(0)` 会与「临时区」哨兵撞车。
+    #[test]
+    fn qa_v110_add_targets_normalizes_zero_to_temp() {
+        let st = AppState::new();
+        st.add_targets(vec![TargetEntry {
+            name: "h".into(),
+            host: "10.0.0.1".into(),
+            folder_id: Some(0), // 前端若把临时区哨兵当 id 传来
+        }])
+        .unwrap();
+        let f = st.target_states();
+        assert_eq!(f[0].folder_id, None, "Some(0) 应归一为 None（临时区）");
+        assert_eq!(st.list_folders()[0].count, 1, "应计入临时区台数");
+    }
+
+    /// 合法 folder_id 仍须正常工作（校验不得误伤正常路径）
+    #[test]
+    fn qa_v110_add_targets_accepts_valid_folder() {
+        let st = AppState::new();
+        let a = st.create_folder("机房A", "sky").unwrap();
+        st.add_targets(vec![TargetEntry {
+            name: "h".into(),
+            host: "10.0.0.1".into(),
+            folder_id: Some(a),
+        }])
+        .unwrap();
+        assert_eq!(st.target_states()[0].folder_id, Some(a));
     }
 
     /// 构造带指定目标数与上限开关的配置（用于并发开关测试）

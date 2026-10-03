@@ -77,8 +77,16 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
     if (edit.id === null) setEdit({ ...edit, name: "", color: "sky" });
   });
 
+  // 降级数据：listFolders 自带的 count（后端算的，可能滞后但绝不为 0）。
+  // ⚠️ 必须先建 Map 再查 —— countOf 在 map 内逐项调用，对 folders 做 find 会退化成 O(n²)。
+  const fallbackCounts = React.useMemo(() => {
+    const m = new Map<number, number>();
+    for (const f of folders) m.set(f.folder.id, f.count);
+    return m;
+  }, [folders]);
+
   // 实时台数：优先用 counts（来自快照），无 counts 时退回 listFolders 的 count
-  const countOf = (id: number) => counts?.get(id) ?? 0;
+  const countOf = (id: number) => counts?.get(id) ?? fallbackCounts.get(id) ?? 0;
   const total = folders.reduce((a, f) => a + countOf(f.folder.id), 0);
   const allChecked = scope.size === 0;
   return (

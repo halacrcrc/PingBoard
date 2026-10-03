@@ -189,14 +189,31 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
   // 在 doAdd 前统一注入 folder_id —— 避免各 submit 路径各写一遍而漏掉。
   const [folderId, setFolderId] = React.useState<number | null>(null);
 
+  // 🩸 有效文件夹 id 集合。folderId 可能指向**已被删除**的文件夹 —— 侧边栏删文件夹
+  // 不会重置本对话框的 state，而组件并未卸载。不校验的话 <select> 找不到匹配
+  // <option>（显示空白），提交时仍带着失效 id；后端现在也会拒绝，但那时用户
+  // 已经填完一堆 IP 才发现白填。
+  // ⚠️ 依赖用 id 集合而非 folders 对象本身，避免 R6（ping-snapshot 重建引用）。
+  const validFolderIds = React.useMemo(
+    () => new Set((folders ?? []).map((f) => f.folder.id)),
+    [folders]
+  );
+
   React.useEffect(() => {
     if (open) {
       setError(null);
       setBusy(false);
       setStartNow(true);
       setDupPrompt(null);
+      // 每次打开都回到临时区：上次的选择可能已随文件夹删除而失效
+      setFolderId(null);
     }
   }, [open]);
+
+  // 兜底：对话框开着期间文件夹被删（侧边栏可达），回落临时区而非静默提交失效 id
+  React.useEffect(() => {
+    if (folderId !== null && !validFolderIds.has(folderId)) setFolderId(null);
+  }, [validFolderIds, folderId]);
 
   // 已有目标的 host 集合（去首尾空白 + 小写），用 Set 保证 O(1) 查找。
   // ⚠️ 必须在 `if (!open) return null` 之前无条件调用（React Hooks 规则：hook 不得位于条件 return 之后）

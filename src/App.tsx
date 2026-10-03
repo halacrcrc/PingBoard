@@ -550,6 +550,13 @@ const App: React.FC = () => {
     [folders]
   );
 
+  // ⚠️ 必须 memo：ping-snapshot 每 500ms 重建 snapshot 引用，
+  // 内联调用会让 FolderSidebar 每 500ms 拿一个新 Map 而无谓重渲染。
+  const folderCountsMap = React.useMemo(
+    () => folderCounts(snapshot.targets, realFolderIds),
+    [snapshot.targets, realFolderIds]
+  );
+
   const scopedTargets = React.useMemo(
     () => filterByFolderScope(snapshot.targets, folderScope),
     [snapshot.targets, folderScope]
@@ -674,7 +681,7 @@ const App: React.FC = () => {
       <div className="flex-1 flex min-h-0">
       <FolderSidebar
         folders={folders}
-        counts={folderCounts(snapshot.targets, realFolderIds)}
+        counts={folderCountsMap}
         scope={folderScope}
         disabled={false}
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}

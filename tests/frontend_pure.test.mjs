@@ -1256,6 +1256,47 @@ check("台数：结果与 listFolders 的 count 在静态数据上必须一致",
   eq(c.get(1), 2);
   eq(c.get(0), 1);
 });
+/* ---------- 台数同步：所有文件夹一并生效（审计 Issue 2/3 回归） ---------- */
+
+check("台数同步：清空临时区后，其它文件夹台数不受影响且保持正确 🩸", () => {
+  // 用户提问：「其它文件夹会不会也有这个问题？」
+  // 答案：不会 —— folderCounts 是对 targets 的**全量**统计，不是只算临时区。
+  // 这条用例把该性质锁死，防止将来退化成「只给临时区打补丁」。
+  const folders = [0, 1, 2];   // 临时区 + 两个文件夹
+  // 初始：临时区 3 台，文件夹1 有 2 台，文件夹2 有 1 台
+  let c = folderCounts([
+    { folder_id: null }, { folder_id: null }, { folder_id: null },
+    { folder_id: 1 }, { folder_id: 1 },
+    { folder_id: 2 },
+  ], new Set([1, 2]));
+  eq(c.get(0), 3, "初始临时区 3");
+  eq(c.get(1), 2, "初始文件夹1 = 2");
+  eq(c.get(2), 1, "初始文件夹2 = 1");
+
+  // 清空临时区（3 台全删），文件夹内容不动
+  c = folderCounts([{ folder_id: 1 }, { folder_id: 1 }, { folder_id: 2 }], new Set([1, 2]));
+  eq(c.get(0) ?? 0, 0, "🩸 临时区归零（用户报的 bug）");
+  eq(c.get(1), 2, "🩸 文件夹1 必须仍是 2，不得被清空牵连");
+  eq(c.get(2), 1, "🩸 文件夹2 必须仍是 1");
+});
+
+check("台数同步：删除文件夹内主机后其台数归零，其它不受影响", () => {
+  const c = folderCounts([{ folder_id: 1 }, { folder_id: null }], new Set([1, 2]));
+  eq(c.get(1), 1);
+  eq(c.get(0), 1);
+  const c2 = folderCounts([{ folder_id: null }], new Set([1, 2]));
+  eq(c2.get(1) ?? 0, 0, "文件夹1 归零");
+  eq(c2.get(0), 1, "临时区不受影响");
+});
+
+check("台数同步：新建空文件夹显示 0 而非 undefined", () => {
+  // 后端 list_folders 里新文件夹 count=0；前端实时统计里该 id 根本不在 Map 中。
+  // 两种情况都必须渲染成 0，不能露出 undefined。
+  const c = folderCounts([{ folder_id: 1 }], new Set([1, 2, 3]));
+  eq(c.get(1), 1);
+  eq(c.get(3) ?? 0, 0, "未出现过的文件夹应为 0");
+  eq(c.get(3), undefined, "确认它确实不在 Map 里（渲染层负责兜底成 0）");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {
