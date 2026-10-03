@@ -45,7 +45,8 @@
 ### 3.2 `FolderConfig`
 
     pub struct FolderConfig {
-        pub id: u64,        // 与 target id 独立编号空间
+        pub id: u64,        // ⚠️ 与主机 id 数值上会重叠（各自从 1 递增），靠「不同字段、从不互比」保证安全；
+                              //    0 保留给临时区哨兵，主机 id 从 1 开始故不冲突。见 §3.5
         pub name: String,
         pub color: String,  // 预设色板 key，非自由 hex
     }
@@ -359,3 +360,19 @@ v1.1.9 已发布（tag `v1.1.9` -> `aa8f883`），其安装包**带着这个视�
 `src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`（项目铁律只写了四处，
 漏 `package-lock.json` 会让其 version 滞后）。提完重记 `tauri.conf.json` 的
 md5 基线并同步两侧。
+### 3.5 文件夹 id 与主机 id 的关系（修正一处不准确描述）
+
+**⚠️ 原设计稿写「与 target id 独立编号空间」，这不准确。**
+
+实现中两者**数值上会重叠**（文件夹 id 与主机 id 各自从 1 开始递增）。
+之所以安全，靠的是两条纪律而非数字区间隔离：
+
+1. `folder_id` 与 `TargetState.id` 是**不同字段**，代码中**从不互相比较**。
+   侧边栏渲染与筛选只经由 `folder_id` 走，不与 `id` 交叉。
+2. **`0` 保留为临时区哨兵**（`folder_counts` 用 key `0` 代表「未分类」）。
+   主机 id 从 1 开始、文件夹 id 也从 1 开始，故 **0 永不与任何真实 id 相等** ——
+   这条是硬不变量，若破了会导致某台主机被永久算进临时区且无法移出。
+
+> 这条不变量由 `qa_v110_folder_id_invariants` 锁定。
+> **代码评审注意**：新增任何「某主机是否属于某文件夹」的逻辑时，
+> 绝不可写成 `target.id == folder_id`。

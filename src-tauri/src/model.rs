@@ -103,6 +103,19 @@ pub struct TargetEntry {
     pub name: String,
     #[serde(default)]
     pub host: String,
+    /// 目标文件夹 id（v1.1.10 新增）；`None` 或缺省 = 临时区。
+    ///
+    /// 用容错反序列化：非法值降级为 `None`，绝不让「文件夹字段写错」
+    /// 导致整个添加请求失败（那会让用户以为添加失败，实际是字段问题）。
+    #[serde(default, deserialize_with = "deserialize_folder_id")]
+    pub folder_id: Option<u64>,
+}
+
+/// 文件夹 + 台数（`list_folders` 的返回项，供侧边栏直接渲染）
+#[derive(Debug, Clone, Serialize)]
+pub struct FolderEntry {
+    pub folder: FolderConfig,
+    pub count: usize,
 }
 
 /* ============ 配置字段类型容错（红线 R1 防护，详见 docs/code-review.md） ============ */

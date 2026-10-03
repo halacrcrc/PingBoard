@@ -37,6 +37,11 @@ pub fn run() {
             commands::set_target_events,
             commands::list_system_fonts,
             commands::take_startup_notice,
+            commands::list_folders,
+            commands::create_folder,
+            commands::update_folder,
+            commands::delete_folder,
+            commands::move_targets,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

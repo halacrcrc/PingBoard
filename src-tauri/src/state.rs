@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events::{self, EventKind, FailSource, LogEvent};
-use crate::model::{AppConfig, FolderConfig, PingSettings, Snapshot, Status, TargetConfig, TargetEntry, TargetState};
+use crate::model::{AppConfig, FolderConfig, FolderEntry, PingSettings, Snapshot, Status, TargetConfig, TargetEntry, TargetState};
 use crate::pinger::{fallback, Engine};
 use crate::{config, stats};
 
@@ -333,6 +333,158 @@ impl AppState {
     }
 
     /// 新增目标，返回新分配的 id 列表；若全局正在运行则自动开始 ping
+    /* --------------------- 文件夹（v1.1.10） --------------------- */
+
+    /// 文件夹列表（含每个文件夹与临时区的台数），供侧边栏渲染。
+    ///
+    /// 纯读，不产生副作用。台数按当前 `TargetState.folder_id` 实时统计，
+    /// 因此移动主机后无需额外同步。
+    pub fn list_folders(&self) -> Vec<FolderEntry> {
+        let folders = self.inner.folders.lock().unwrap().clone();
+        let counts = self.folder_counts();
+        let mut out: Vec<FolderEntry> = folders
+            .into_iter()
+            .map(|f| {
+                let count = *counts.get(&f.id).unwrap_or(&0);
+                FolderEntry { folder: f, count }
+            })
+            .collect();
+        // 临时区固定排第一（folder_id = None 的主机）
+        out.insert(
+            0,
+            FolderEntry {
+                folder: FolderConfig {
+                    id: 0,
+                    name: "临时区".to_string(),
+                    color: crate::model::FOLDER_COLOR_SLATE.to_string(),
+                },
+                count: *counts.get(&0).unwrap_or(&0),
+            },
+        );
+        out
+    }
+
+    /// 统计各文件夹台数；key 0 代表临时区（`folder_id = None`）。
+    fn folder_counts(&self) -> HashMap<u64, usize> {
+        let mut m: HashMap<u64, usize> = HashMap::new();
+        let list = self.inner.targets.lock().unwrap();
+        for t in list.iter() {
+            let g = t.lock().unwrap();
+            // 🩸 失效的 folder_id 归入临时区计数，避免侧边栏台数与实际不符
+            let key = match g.folder_id {
+                Some(fid) => {
+                    if self.folder_exists(fid) {
+                        fid
+                    } else {
+                        0
+                    }
+                }
+                None => 0,
+            };
+            *m.entry(key).or_insert(0) += 1;
+        }
+        m
+    }
+
+    fn folder_exists(&self, id: u64) -> bool {
+        self.inner.folders.lock().unwrap().iter().any(|f| f.id == id)
+    }
+
+    /// 新建文件夹，返回新 id。名称 trim 后为空时用「未命名文件夹」。
+    /// 颜色经 `normalize_folder_color` 归一（未知色降级 slate，不报错）。
+    pub fn create_folder(&self, name: &str, color: &str) -> Result<u64, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("文件夹名称不能为空".to_string());
+        }
+        let mut fs = self.inner.folders.lock().unwrap();
+        // id 空间：取现有最大值 +1（0 保留给临时区）
+        let next = fs.iter().map(|f| f.id).max().unwrap_or(0) + 1;
+        fs.push(FolderConfig {
+            id: next,
+            name: name.to_string(),
+            color: crate::model::normalize_folder_color(color),
+        });
+        Ok(next)
+    }
+
+    /// 重命名 / 改颜色。文件夹不存在时返回 Err（不静默成功）。
+    pub fn update_folder(&self, id: u64, name: &str, color: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("文件夹名称不能为空".to_string());
+        }
+        let mut fs = self.inner.folders.lock().unwrap();
+        match fs.iter_mut().find(|f| f.id == id) {
+            Some(f) => {
+                f.name = name.to_string();
+                f.color = crate::model::normalize_folder_color(color);
+                Ok(())
+            }
+            None => Err(format!("文件夹不存在：{}", id)),
+        }
+    }
+
+    /// 删除文件夹；其下主机按 `move_to` 迁移（`None` = 移到临时区）。
+    ///
+    /// 🩸 **绝不删除主机** —— 删除文件夹只改归属，这与「清空列表只清临时区」
+    /// 是同一条安全原则。
+    pub fn delete_folder(&self, id: u64, move_to: Option<u64>) -> Result<usize, String> {
+        {
+            let fs = self.inner.folders.lock().unwrap();
+            if !fs.iter().any(|f| f.id == id) {
+                return Err(format!("文件夹不存在：{}", id));
+            }
+            if let Some(to) = move_to {
+                if to == id {
+                    return Err("不能把主机移入正在删除的文件夹".to_string());
+                }
+                if !fs.iter().any(|f| f.id == to) {
+                    return Err(format!("目标文件夹不存在：{}", to));
+                }
+            }
+        }
+        {
+            let mut fs = self.inner.folders.lock().unwrap();
+            fs.retain(|f| f.id != id);
+        }
+        let ids: Vec<u64> = {
+            let list = self.inner.targets.lock().unwrap();
+            list.iter()
+                .filter_map(|t| {
+                    let g = t.lock().unwrap();
+                    if g.folder_id == Some(id) {
+                        Some(g.id)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        self.move_targets(&ids, move_to)?;
+        Ok(ids.len())
+    }
+
+    /// 把指定主机移动到目标文件夹（`None` = 移出到临时区）。
+    /// 返回实际移动的台数；主机不存在时静默跳过（不报错，与 remove_targets 一致）。
+    pub fn move_targets(&self, ids: &[u64], folder_id: Option<u64>) -> Result<usize, String> {
+        if let Some(fid) = folder_id {
+            if !self.folder_exists(fid) {
+                return Err(format!("目标文件夹不存在：{}", fid));
+            }
+        }
+        let mut moved = 0usize;
+        let list = self.inner.targets.lock().unwrap();
+        for t in list.iter() {
+            let mut g = t.lock().unwrap();
+            if ids.contains(&g.id) {
+                g.folder_id = folder_id;
+                moved += 1;
+            }
+        }
+        Ok(moved)
+    }
+
     pub fn add_targets(&self, entries: Vec<TargetEntry>) -> Result<Vec<u64>, String> {
         let mut ids: Vec<u64> = Vec::new();
         {
@@ -982,6 +1134,161 @@ mod tests {
         }
     }
 
+/* --------------------- 文件夹 CRUD 测试（v1.1.10 批次 B） --------------------- */
+
+    /// 建 N 台主机的辅助（全部落在临时区）
+    fn add_n(st: &AppState, n: usize) -> Vec<u64> {
+        let entries: Vec<TargetEntry> = (0..n)
+            .map(|i| TargetEntry {
+                name: format!("h{}", i),
+                host: format!("10.0.0.{}", i + 1),
+                folder_id: None,
+            })
+            .collect();
+        st.add_targets(entries).unwrap()
+    }
+
+    /// 新建 → 台数统计 → 移动 → 台数变化
+    #[test]
+    fn qa_v110_folder_create_move_and_counts() {
+        let st = AppState::new();
+        let ids = add_n(&st, 3);
+        // 初始：临时区 3 台、文件夹列表只有临时区一项
+        let list = st.list_folders();
+        assert_eq!(list.len(), 1, "未建文件夹时只应有临时区");
+        assert_eq!(list[0].count, 3, "临时区应有 3 台");
+        assert_eq!(list[0].folder.name, "临时区");
+
+        let fid = st.create_folder("机房A", "sky").unwrap();
+        let list = st.list_folders();
+        assert_eq!(list.len(), 2, "建 1 个文件夹后应为 2 项");
+        assert_eq!(list[1].folder.name, "机房A");
+        assert_eq!(list[1].count, 0, "新文件夹应为空");
+
+        // 把第 1 台移进去
+        let moved = st.move_targets(&ids[0..1], Some(fid)).unwrap();
+        assert_eq!(moved, 1, "应移动 1 台");
+        let list = st.list_folders();
+        assert_eq!(list[0].count, 2, "临时区应剩 2 台");
+        assert_eq!(list[1].count, 1, "机房A 应有 1 台");
+
+        // 移回临时区
+        st.move_targets(&ids[0..1], None).unwrap();
+        assert_eq!(st.list_folders()[0].count, 3, "移回后临时区应恢复 3 台");
+        assert_eq!(st.list_folders()[1].count, 0, "机房A 应变空");
+    }
+
+    /// 🩸 删除文件夹**绝不删除主机** —— 只改归属，且默认迁回临时区。
+    /// 这是「清空列表只清临时区」同源的安全原则。
+    #[test]
+    fn qa_v110_delete_folder_never_deletes_hosts() {
+        let st = AppState::new();
+        let ids = add_n(&st, 4);
+        let a = st.create_folder("A", "red").unwrap();
+        let b = st.create_folder("B", "blue").unwrap();
+        st.move_targets(&ids[0..2], Some(a)).unwrap();
+        st.move_targets(&ids[2..4], Some(b)).unwrap();
+        assert_eq!(st.target_states().len(), 4, "前提：4 台都在");
+
+        // 删 A，其下 2 台按 move_to = None 迁回临时区
+        let n = st.delete_folder(a, None).unwrap();
+        assert_eq!(n, 2, "应有 2 台被迁移");
+        assert_eq!(
+            st.target_states().len(),
+            4,
+            "🩸 删除文件夹后主机台数必须不变（绝不能连带删除）"
+        );
+        assert_eq!(st.list_folders()[0].count, 2, "A 的 2 台应回到临时区");
+        assert_eq!(st.list_folders().len(), 2, "只剩临时区与 B");
+    }
+
+    /// 删除文件夹时把主机迁往另一个文件夹
+    #[test]
+    fn qa_v110_delete_folder_migrates_to_other_folder() {
+        let st = AppState::new();
+        let ids = add_n(&st, 3);
+        let a = st.create_folder("A", "red").unwrap();
+        let b = st.create_folder("B", "blue").unwrap();
+        st.move_targets(&ids[0..3], Some(a)).unwrap();
+
+        st.delete_folder(a, Some(b)).unwrap();
+        assert_eq!(st.list_folders()[1].count, 3, "A 的 3 台应迁到 B");
+    }
+
+    /// 非法操作必须报错，且**不产生副作用**
+    #[test]
+    fn qa_v110_folder_invalid_ops_rejected() {
+        let st = AppState::new();
+        let ids = add_n(&st, 2);
+        let a = st.create_folder("A", "red").unwrap();
+
+        // 空名
+        assert!(st.create_folder("   ", "sky").is_err(), "空白名应被拒");
+        // 更新不存在的文件夹
+        assert!(st.update_folder(999, "X", "sky").is_err(), "不存在应报 Err");
+        // 移入不存在的文件夹
+        assert!(st.move_targets(&ids, Some(999)).is_err(), "移入不存在应报 Err");
+        // 删不存在的文件夹
+        assert!(st.delete_folder(999, None).is_err(), "删不存在应报 Err");
+        // 不能移入自己（删除时）
+        assert!(st.delete_folder(a, Some(a)).is_err(), "不能移入正在删除的文件夹");
+
+        // 关键：以上失败后状态必须未变
+        assert_eq!(st.list_folders().len(), 2, "文件夹数量应仍为 2（临时区 + A）");
+        assert_eq!(st.list_folders()[0].count, 2, "主机应仍在临时区");
+    }
+
+    /// 重命名 + 改颜色；未知颜色降级为 slate
+    #[test]
+    fn qa_v110_update_folder_rename_and_color() {
+        let st = AppState::new();
+        let a = st.create_folder("旧名", "sky").unwrap();
+        st.update_folder(a, "新名", "不存在的颜色").unwrap();
+        let list = st.list_folders();
+        assert_eq!(list[1].folder.name, "新名", "应已重命名");
+        assert_eq!(list[1].folder.color, "slate", "未知颜色应降级为 slate");
+    }
+
+    /// 台数统计对「失效 folder_id」归入临时区（与孤儿回落口径一致）
+    #[test]
+    fn qa_v110_counts_treat_orphan_as_temp() {
+        let st = AppState::new();
+        let ids = add_n(&st, 2);
+        let a = st.create_folder("A", "sky").unwrap();
+        st.move_targets(&ids[0..1], Some(a)).unwrap();
+        // 人为制造孤儿：直接改内存状态（模拟配置被手改的极端情况）
+        {
+            let list = st.inner.targets.lock().unwrap();
+            let mut g = list[0].lock().unwrap();
+            g.folder_id = Some(4242);
+        }
+        let l = st.list_folders();
+        assert_eq!(l[0].count, 2, "孤儿应被计入临时区（1 台原有 + 1 台孤儿）");
+        assert_eq!(l[1].count, 0, "已不存在的文件夹不应有台数");
+    }
+
+    /// 文件夹 id 的真实不变量。
+    ///
+    /// ⚠️ 修正一处不准确的设计描述：文件夹 id 与主机 id **数值上会重叠**
+    /// （两者各自从 1 开始递增），并非「独立编号空间」。之所以安全，是因为：
+    ///   ① `folder_id` 与 `TargetState.id` 是**不同字段**，代码中从不互相比较；
+    ///   ② 侧边栏渲染与筛选只经由 `folder_id`，不与 `id` 交叉。
+    /// 真正必须守住的不变量是下面两条：
+    #[test]
+    fn qa_v110_folder_id_invariants() {
+        let st = AppState::new();
+        let ids = add_n(&st, 2);
+        let a = st.create_folder("A", "sky").unwrap();
+        let b = st.create_folder("B", "sky").unwrap();
+        // ① 文件夹 id 彼此唯一
+        assert!(a != b, "两个文件夹 id 必须不同");
+        // ② 临时区哨兵 0 绝不与任何主机 id 相等（主机 id 从 1 开始）
+        //    —— 这是 folder_counts 用 0 代表临时区的前提，若这条破了，
+        //    某台主机会被永久算进临时区且无法被移出。
+        assert!(!ids.contains(&0), "主机 id 不得为 0（否则撞临时区哨兵）");
+        assert!(a != 0 && b != 0, "文件夹 id 不得为 0（0 保留给临时区）");
+    }
+
     /// 构造带指定目标数与上限开关的配置（用于并发开关测试）
     fn build_cfg_limited(
         target_count: usize,
@@ -1118,7 +1425,8 @@ mod tests {
         assert!(
             st.add_targets(vec![TargetEntry {
                 name: "".into(),
-                host: "   ".into()
+                host: "   ".into(),
+                folder_id: None
             }])
             .is_err(),
             "空主机名应被拒绝"
@@ -1131,6 +1439,7 @@ mod tests {
             .add_targets(vec![TargetEntry {
                 name: "dns".into(),
                 host: "223.5.5.5".into(),
+                folder_id: None,
             }])
             .unwrap();
         assert_eq!(ids.len(), 1);

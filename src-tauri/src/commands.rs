@@ -2,7 +2,7 @@
 use tauri::{AppHandle, State};
 
 use crate::events::LogEvent;
-use crate::model::{PingSettings, Snapshot, TargetEntry};
+use crate::model::{FolderEntry, PingSettings, Snapshot, TargetEntry};
 use crate::state::{AppState, StopReason};
 use crate::{config, export};
 
@@ -130,6 +130,66 @@ pub async fn export_report(
     let filter = export::parse_filter(filter.as_deref())?;
     let targets = state.export_targets(ids.as_deref());
     export::write_report(&path, &format, &targets, filter)
+}
+
+/* --------------------- 文件夹（v1.1.10） --------------------- */
+
+/// 列出文件夹及各自台数（第 0 项固定为「临时区」）
+#[tauri::command]
+pub async fn list_folders(state: State<'_, AppState>) -> Result<Vec<FolderEntry>, String> {
+    Ok(state.list_folders())
+}
+
+/// 新建文件夹，返回新 id
+#[tauri::command]
+pub async fn create_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    color: String,
+) -> Result<u64, String> {
+    let id = state.create_folder(&name, &color)?;
+    state.save_config(&app)?;
+    Ok(id)
+}
+
+/// 重命名 / 改颜色
+#[tauri::command]
+pub async fn update_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: u64,
+    name: String,
+    color: String,
+) -> Result<(), String> {
+    state.update_folder(id, &name, &color)?;
+    state.save_config(&app)
+}
+
+/// 删除文件夹；其下主机迁至 `move_to`（`None` = 临时区）。返回迁移台数。
+#[tauri::command]
+pub async fn delete_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: u64,
+    move_to: Option<u64>,
+) -> Result<usize, String> {
+    let n = state.delete_folder(id, move_to)?;
+    state.save_config(&app)?;
+    Ok(n)
+}
+
+/// 把主机移动到目标文件夹（`None` = 移出到临时区）。返回实际移动台数。
+#[tauri::command]
+pub async fn move_targets(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ids: Vec<u64>,
+    folder_id: Option<u64>,
+) -> Result<usize, String> {
+    let n = state.move_targets(&ids, folder_id)?;
+    state.save_config(&app)?;
+    Ok(n)
 }
 
 /// 取走启动期的一次性提示（配置损坏 / 已备份 / 抢救结果），**取走即清空**。
