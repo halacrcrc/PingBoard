@@ -292,3 +292,22 @@ export function tempAreaIds(targets: ReadonlyArray<{ id: number; folder_id: numb
 export function tempAreaCount(targets: ReadonlyArray<{ folder_id: number | null }>): number {
   return targets.reduce((a, t) => (t.folder_id === null ? a + 1 : a), 0);
 }
+
+/**
+ * 按侧边栏范围算出导出要用的目标 id 列表（C2，已定稿见 docs/folder-design.md 7.3）。
+ *
+ * 🩸 **范围为空时返回 `null` 而不是 `[]`/`[全部 id]`** —— `null` 在后端语义是
+ * 「导出全部」。这样侧边栏没勾选任何文件夹时，导出请求与 v1.1.9 **逐字节一致**
+ * （含默认文件名），不因新增功能产生任何输出差异。
+ *
+ * 只跟随**侧边栏范围**，不跟随搜索关键词：搜索是瞬时视图过滤，
+ * 而文件夹范围是结构性的归属。「我正在看机房A，导出机房A的全部」才符合直觉。
+ */
+export function exportScopeIds(
+  targets: ReadonlyArray<{ id: number; folder_id: number | null }>,
+  scope: ReadonlySet<number>
+): number[] | null {
+  if (scope.size === 0) return null;
+  const s = scope as ReadonlySet<number>;
+  return targets.filter((t) => s.has(t.folder_id ?? 0)).map((t) => t.id);
+}

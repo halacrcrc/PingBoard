@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { filterByFolderScope, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
+import { exportScopeIds, filterByFolderScope, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -508,7 +508,11 @@ const App: React.FC = () => {
     onlySelected: boolean,
     filter: ExportFilter = "all"
   ) => {
-    const ids = onlySelected ? [...selected] : null;
+    // C2：导出范围跟随侧边栏。优先级「仅选中」> 侧边栏范围 > 全部(null)。
+    // exportScopeIds 在范围为空时返回 null，故未勾选文件夹时与 v1.1.9 逐字节一致。
+    const ids = onlySelected
+      ? [...selected]
+      : exportScopeIds(snapshot.targets, folderScope);
     try {
       const ext = format;
       // 仅在带筛选时给默认文件名加后缀，避免与既有报表同名混淆
@@ -763,7 +767,7 @@ const App: React.FC = () => {
       {/* 导出报表（可选范围 + 筛选口径 + 格式）。默认路径不变，故仍从工具栏「导出 ▾」进入 */}
       <ExportDialog
         open={showExport}
-        targets={snapshot.targets}
+        targets={scopedTargets}
         selected={selected}
         onClose={() => setShowExport(false)}
         onExport={handleExport}

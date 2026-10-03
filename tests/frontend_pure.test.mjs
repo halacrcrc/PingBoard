@@ -1094,6 +1094,60 @@ check("清空列表：folder_id 为 0 视为文件夹而非临时区", () => {
   eq(tempAreaIds([t0]), [], "folder_id=0 不等于临时区，不得被清空列表删掉");
   eq(tempAreaCount([t0]), 0);
 });
+/* ---------- C2 导出范围跟随侧边栏（v1.1.10 批次 F） ---------- */
+
+const { exportScopeIds } = fmt;
+
+/** 4 台：id1/2 在文件夹 1，id3 在文件夹 2，id4 在临时区（folder_id=null） */
+const scopeSample = () => [
+  { id: 1, folder_id: 1 }, { id: 2, folder_id: 1 },
+  { id: 3, folder_id: 2 }, { id: 4, folder_id: null },
+];
+
+check("C2 导出范围：侧边栏未勾选任何文件夹时返回 null（= 全部）🩸", () => {
+  // null 在后端语义是「导出全部」。若这里返回全部 id 数组，v1.1.9 的
+  // 「未勾选 -> 导出全部」路径就会产生额外差异，破坏兼容性。
+  eq(exportScopeIds(scopeSample(), new Set()), null, "范围为空必须返回 null");
+});
+
+check("C2 导出范围：勾选某文件夹后只导出该文件夹的主机", () => {
+  eq(exportScopeIds(scopeSample(), new Set([1])), [1, 2]);
+  eq(exportScopeIds(scopeSample(), new Set([2])), [3]);
+});
+
+check("C2 导出范围：多选文件夹时取并集", () => {
+  eq(exportScopeIds(scopeSample(), new Set([1, 2])), [1, 2, 3]);
+});
+
+check("C2 导出范围：勾选「临时区」(id 0) 导出 folder_id 为 null 的主机", () => {
+  eq(exportScopeIds(scopeSample(), new Set([0])), [4]);
+});
+
+check("C2 导出范围：结果顺序与传入顺序一致（导出序号才稳定）", () => {
+  const shuffled = [{ id: 9, folder_id: 1 }, { id: 7, folder_id: 1 }];
+  eq(exportScopeIds(shuffled, new Set([1])), [9, 7], "不得自行排序或反序");
+});
+
+check("C2 导出范围：勾选的文件夹为空（无主机）时返回空数组而非 null", () => {
+  // 空数组 = 明确导出 0 台；null = 全部。两者语义不同，不得混淆。
+  eq(exportScopeIds(scopeSample(), new Set([99])), []);
+});
+
+check("C2 导出范围：空目标列表 + 空范围 = null（仍是全部，不报错）", () => {
+  eq(exportScopeIds([], new Set()), null);
+});
+
+check("C2 导出范围：结果不含范围外的任何主机 🩸", () => {
+  const s = new Set([1]);
+  const got = exportScopeIds(scopeSample(), s) ?? [];
+  for (const t of scopeSample()) {
+    if ((t.folder_id ?? 0) !== 1) {
+      if (got.includes(t.id)) {
+        throw new Error("主机 " + t.id + " 不在所选文件夹内却被列入导出清单");
+      }
+    }
+  }
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {
