@@ -1,7 +1,7 @@
 // 添加主机对话框：支持单个添加、批量粘贴（自动去重/跳过注释）与 IP 段展开、从文件导入
 import React from "react";
 import * as dialog from "@tauri-apps/plugin-dialog";
-import type { ImportPayload, TargetEntry } from "../types";
+import type { FolderEntry, ImportPayload, TargetEntry } from "../types";
 import * as api from "../lib/api";
 import ConfirmDialog from "./ConfirmDialog";
 
@@ -13,6 +13,8 @@ export interface AddTargetsDialogProps {
   running: boolean;
   /** 列表中已有目标的 host 列表（已小写化），用于跨批次重复检测 */
   existingHosts: string[];
+  /** v1.1.10：可选的目标文件夹；`id === 0` 为临时区。空数组则只显示「临时区」 */
+  folders?: FolderEntry[];
 }
 
 /** 单次批量展开上限，防止误输入造成爆炸 */
@@ -169,7 +171,7 @@ export function decideAdd(entries: TargetEntry[], existingHosts: string[]): AddD
   return dups.length === 0 ? { action: "add", entries } : { action: "confirm", entries, dups };
 }
 
-const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts }) => {
+const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts, folders }) => {
   const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
   const [name, setName] = React.useState("");
@@ -183,6 +185,9 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
   const [fileBusy, setFileBusy] = React.useState(false);
   // 跨批次重复确认状态：非空时弹出确认框（记录本次待提交条目与其重复 host）
   const [dupPrompt, setDupPrompt] = React.useState<{ entries: TargetEntry[]; dups: string[] } | null>(null);
+  // v1.1.10：本次添加的目标归属文件夹（null = 临时区）。三个页签共用，故只存一处，
+  // 在 doAdd 前统一注入 folder_id —— 避免各 submit 路径各写一遍而漏掉。
+  const [folderId, setFolderId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     if (open) {
@@ -234,7 +239,9 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     setBusy(true);
     setError(null);
     try {
-      const ids = await api.addTargets(entries);
+      const ids = await api.addTargets(
+        entries.map((e) => ({ ...e, folder_id: folderId }))
+      );
       if (startNow) {
         await api.startPinging(ids);
       }
@@ -375,6 +382,24 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
             <button className={tabClass(tab === "file")} onClick={() => setTab("file")}>
               从文件导入
             </button>
+          </div>
+
+          {/* v1.1.10：目标文件夹（三个页签共用；null = 临时区）*/}
+          <div className="mb-3 flex items-center gap-2">
+            <span className={label}>归入</span>
+            <select
+              className={input}
+              value={folderId === null ? "0" : String(folderId)}
+              onChange={(e) => setFolderId(e.target.value === "0" ? null : Number(e.target.value))}
+              title="本次添加的主机归属哪个文件夹；临时区的机器可用「清空列表」一键移除"
+            >
+              {(folders ?? []).map((f) => (
+                <option key={f.folder.id} value={f.folder.id}>
+                  {f.folder.name || "(未命名)"}（{f.count}）
+                </option>
+              ))}
+              {(folders ?? []).length === 0 && <option value="0">临时区</option>}
+            </select>
           </div>
 
           {tab === "single" && (

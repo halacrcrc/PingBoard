@@ -276,3 +276,19 @@ export function toggleScope(scope: ReadonlySet<number>, id: number): Set<number>
 
 /** 文件夹 id 0 固定代表「临时区」（与后端 list_folders 的约定） */
 export const TEMP_AREA_ID = 0;
+/**
+ * 「清空列表」要删除的主机 id —— **只含临时区**（`folder_id == null`）。
+ *
+ * 口径（已定稿，见 docs/folder-design.md 7.4）：清空列表**只清临时区**，
+ * 文件夹里的 IP 不受影响。要删文件夹内的主机请用侧边栏的「删除文件夹」。
+ *
+ * 纯函数，便于单测锁住「文件夹里的 IP 不会被误删」这条安全性质。
+ */
+export function tempAreaIds(targets: ReadonlyArray<{ id: number; folder_id: number | null }>): number[] {
+  return targets.filter((t) => t.folder_id === null).map((t) => t.id);
+}
+
+/** 临时区台数（用于「清空列表」确认框文案） */
+export function tempAreaCount(targets: ReadonlyArray<{ folder_id: number | null }>): number {
+  return targets.reduce((a, t) => (t.folder_id === null ? a + 1 : a), 0);
+}

@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { filterByFolderScope, toggleScope } from "./lib/format";
+import { filterByFolderScope, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -607,13 +607,19 @@ const App: React.FC = () => {
   const handleStartSelected = () => guard(() => api.startPinging([...selected]));
   const handleStopSelected = () => guard(() => api.stopPinging([...selected]));
 
+  // 文件夹内（非临时区）的主机台数 —— 供「清空列表」确认框说明影响范围
+  const folderedCount = snapshot.targets.length - tempAreaCount(snapshot.targets);
+
   const handleClearList = () => {
-    if (snapshot.targets.length > 0) setConfirmClear(true);
+    if (tempAreaCount(snapshot.targets) > 0) setConfirmClear(true);
   };
 
   const doClearList = () => {
     setConfirmClear(false);
-    const ids = snapshot.targets.map((t) => t.id);
+    // 🩸 只删临时区（folder_id === null）。文件夹里的 IP **不受影响**，
+    // 这是已定稿口径（docs/folder-design.md 7.4）—— 要删文件夹内的主机
+    // 请用侧边栏的「删除文件夹」，避免一次误操作丢掉长期整理好的清单。
+    const ids = tempAreaIds(snapshot.targets);
     if (ids.length === 0) return;
     // remove_targets 内部会先停止对应工作线程，再删除目标
     guard(() => api.removeTargets(ids)).then(() => {
@@ -767,8 +773,11 @@ const App: React.FC = () => {
         open={showAdd}
         running={snapshot.running}
         existingHosts={existingHosts}
+        folders={folders}
         onClose={() => setShowAdd(false)}
         onAdded={(ids) => {
+          // 新增主机可能进了文件夹，侧边栏台数需重取
+          refreshFolders();
           // 用「添加前快照长度 + 本次新增数」估算添加后总数（刻意不等快照刷新后再判断）。
           // 限制实际发生在启动 Ping 时：> max_threads（且启用上限）会被拦截，> 4096 为硬保护。
           const nextTotal = snapshot.targets.length + ids.length;
@@ -796,8 +805,14 @@ const App: React.FC = () => {
         confirmText="清空列表"
         message={
           <>
-            确定要删除全部 <b>{snapshot.targets.length}</b> 个目标吗？此操作会同时清除它们的主机条目与统计数据，
-            且无法撤销。
+            确定要删除临时区的 <b>{tempAreaCount(snapshot.targets)}</b> 个目标吗？此操作会同时清除它们的
+            主机条目与统计数据，且无法撤销。
+            {folderedCount > 0 && (
+              <>
+                <br />
+                <b>文件夹内的 {folderedCount} 个 IP 不受影响</b>，仍会保留。
+              </>
+            )}
           </>
         }
         onConfirm={doClearList}

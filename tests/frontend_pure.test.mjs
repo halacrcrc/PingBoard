@@ -1055,6 +1055,45 @@ check("文件夹范围：filterByFolderScope 不改原数组", () => {
   eq(filterByFolderScope(TS, new Set([1])).length, 1);
   eq(TS.length, 4, "原数组长度不应变");
 });
+/* ---------- 清空列表只清临时区（v1.1.10 批次 E） ---------- */
+
+const { tempAreaIds, tempAreaCount } = fmt;
+
+check("清空列表：只返回临时区（folder_id === null）的主机 🩸", () => {
+  // 前提：TS[0]/TS[1] 是临时区（folder_id=null），TS[2]/TS[3] 在文件夹里
+  eq(TS.map((t) => t.folder_id), [null, null, 1, 2], "前提：样本归属应如上");
+  eq(tempAreaIds(TS), [1, 2], "只应返回临时区那两台");
+  eq(tempAreaCount(TS), 2);
+});
+
+check("清空列表：文件夹内的 IP 一个都不能被删掉", () => {
+  const inFolder = TS.filter((t) => t.folder_id !== null).map((t) => t.id);
+  const toDelete = tempAreaIds(TS);
+  for (const id of inFolder) {
+    if (toDelete.includes(id)) {
+      throw new Error("主机 " + id + " 在文件夹里却被列入删除清单，会误删用户整理好的 IP");
+    }
+  }
+});
+
+check("清空列表：全是文件夹主机时删除清单为空（而不是退回全删）", () => {
+  const onlyFolder = TS.filter((t) => t.folder_id !== null);
+  eq(tempAreaIds(onlyFolder), [], "无临时区主机时不得返回任何 id");
+  eq(tempAreaCount(onlyFolder), 0);
+});
+
+check("清空列表：空列表返回空数组", () => {
+  eq(tempAreaIds([]), []);
+  eq(tempAreaCount([]), 0);
+});
+
+check("清空列表：folder_id 为 0 视为文件夹而非临时区", () => {
+  // 侧边栏里「临时区」用 id 0 代表，但目标上的 folder_id 为 null 才算临时区。
+  // 两者不得混淆：folder_id === 0 的目标仍属于某个真实文件夹。
+  const t0 = { ...mkT(9, 0) };
+  eq(tempAreaIds([t0]), [], "folder_id=0 不等于临时区，不得被清空列表删掉");
+  eq(tempAreaCount([t0]), 0);
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {
