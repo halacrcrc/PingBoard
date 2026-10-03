@@ -1,6 +1,6 @@
 // Tauri invoke 命令封装：与 Rust 侧 #[tauri::command] 一一对应
 import { invoke } from "@tauri-apps/api/core";
-import type { ImportPayload, LogEvent, PingSettings, Snapshot, TargetEntry } from "../types";
+import type { FolderEntry, ImportPayload, LogEvent, PingSettings, Snapshot, TargetEntry } from "../types";
 import type { ExportFilter } from "./format";
 
 /** 获取当前完整快照（目标列表 + 设置 + 汇总统计） */
@@ -93,3 +93,25 @@ export const listSystemFonts = (): Promise<string[]> =>
  */
 export const takeStartupNotice = (): Promise<string | null> =>
   invoke<string | null>("take_startup_notice");
+
+/* --------------------- 文件夹（v1.1.10） --------------------- */
+
+/** 列出文件夹及各自台数；`id === 0` 固定代表「临时区」，永远排在第一项 */
+export const listFolders = (): Promise<FolderEntry[]> =>
+  invoke<FolderEntry[]>("list_folders");
+
+/** 新建文件夹，返回新 id。颜色传预设色板 key，未知值后端会降级为 slate */
+export const createFolder = (name: string, color: string): Promise<number> =>
+  invoke<number>("create_folder", { name, color });
+
+/** 重命名 / 改颜色 */
+export const updateFolder = (id: number, name: string, color: string): Promise<void> =>
+  invoke<void>("update_folder", { id, name, color });
+
+/** 删除文件夹；其下主机迁至 `moveTo`（null = 临时区），返回迁移台数 */
+export const deleteFolder = (id: number, moveTo: number | null): Promise<number> =>
+  invoke<number>("delete_folder", { id, moveTo });
+
+/** 把主机移动到目标文件夹（null = 移出到临时区），返回实际移动台数 */
+export const moveTargets = (ids: number[], folderId: number | null): Promise<number> =>
+  invoke<number>("move_targets", { ids, folderId });

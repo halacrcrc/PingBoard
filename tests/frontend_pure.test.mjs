@@ -1000,6 +1000,61 @@ check("导出筛选：文案 label / hint 三档互不相同且非空", () => {
   eq(new Set(hints).size, 3, "三档 hint 必须互不相同");
 });
 
+/* ---------- 文件夹范围筛选（v1.1.10 批次 D） ---------- */
+
+const { inFolderScope, filterByFolderScope, toggleScope, TEMP_AREA_ID } = fmt;
+
+/** 最小 TargetState：只需 folder_id 参与判定 */
+const mkT = (id, folderId) => ({
+  id, name: "n" + id, host: "h" + id, enabled: true, resolved_ip: null,
+  status: "idle", sent: 0, received: 0, failed: 0,
+  last_rtt_ms: null, min_rtt_ms: null, max_rtt_ms: null, avg_rtt_ms: null,
+  sum_rtt_ms: 0, ttl: null, consecutive_fail: 0, loss_pct: 0,
+  last_success_ts: null, history: [], running: false, last_error: null,
+  events_on: false, folder_id: folderId,
+});
+
+const TS = [mkT(1, null), mkT(2, null), mkT(3, 1), mkT(4, 2)];
+
+check("文件夹范围：一个都不勾 = 全部（反直觉但已定稿的口径）", () => {
+  eq(TS.filter((t) => inFolderScope(t, new Set())).length, 4, "空集合必须命中全部");
+  eq(filterByFolderScope(TS, new Set()), TS, "空集合过滤应原样返回");
+});
+
+check("文件夹范围：folder_id 为 null 归入 id 0（临时区）", () => {
+  eq(TEMP_AREA_ID, 0, "临时区哨兵必须是 0");
+  const scope = new Set([TEMP_AREA_ID]);
+  eq(TS.filter((t) => inFolderScope(t, scope)).map((t) => t.id), [1, 2], "临时区两台");
+});
+
+check("文件夹范围：勾选某文件夹只返回该文件夹内的主机", () => {
+  const scope = new Set([1]);
+  eq(TS.filter((t) => inFolderScope(t, scope)).map((t) => t.id), [3], "机房1 只有 1 台");
+});
+
+check("文件夹范围：多选取并集（临时区 + 机房1 = 3 台）", () => {
+  const scope = new Set([TEMP_AREA_ID, 1]);
+  eq(TS.filter((t) => inFolderScope(t, scope)).map((t) => t.id), [1, 2, 3], "并集应为 1、2、3");
+});
+
+check("文件夹范围：勾选不存在的文件夹 = 无命中（而非退回全部）", () => {
+  const scope = new Set([999]);
+  eq(TS.filter((t) => inFolderScope(t, scope)).length, 0, "未知文件夹应为空");
+});
+
+check("toggleScope：切换勾选且不改入参", () => {
+  const a = new Set([1]);
+  const b = toggleScope(a, 2);
+  eq(Array.from(a).sort(), [1], "入参不得被修改");
+  eq(Array.from(b).sort(), [1, 2], "应新增 2");
+  eq(Array.from(toggleScope(b, 1)).sort(), [2], "再次点击应取消勾选");
+  eq(b.size, 2, "返回的是新集合，原集合不变");
+});
+
+check("文件夹范围：filterByFolderScope 不改原数组", () => {
+  eq(filterByFolderScope(TS, new Set([1])).length, 1);
+  eq(TS.length, 4, "原数组长度不应变");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

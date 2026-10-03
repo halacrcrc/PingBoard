@@ -28,6 +28,8 @@ export interface TargetState {
   last_error: string | null;
   /** 是否记录该主机的事件（运行时单主机开关） */
   events_on: boolean;
+  /** 所属文件夹 id；null = 临时区（v1.1.10 新增） */
+  folder_id: number | null;
 }
 
 /** Ping 设置（对应 Rust 的 PingSettings） */
@@ -76,10 +78,27 @@ export interface Snapshot {
   events: LogEvent[];
 }
 
-/** 新增目标条目（对应 Rust 的 TargetEntry） */
+/** 文件夹（对应 Rust 的 FolderConfig），v1.1.10 新增 */
+export interface FolderConfig {
+  id: number;
+  name: string;
+  /** 预设色板 key，非自由 hex：slate/sky/emerald/amber/red/violet/pink/teal */
+  color: string;
+}
+
+/** 文件夹 + 台数（对应 Rust 的 FolderEntry）。`id === 0` 固定代表「临时区」 */
+export interface FolderEntry {
+  folder: FolderConfig;
+  count: number;
+}
+
+/** 前端新增主机的入参（对应 Rust 的 TargetEntry） */
 export interface TargetEntry {
   name: string;
   host: string;
+  /** 目标文件夹 id；缺省 / null = 临时区（v1.1.10 新增）。
+   *  设为可选是有意的：既有构造点不必逐个改，后端 #[serde(default)] 会兜底。 */
+  folder_id?: number | null;
 }
 
 /** 文件导入解析结果（对应 Rust 的 ImportPayload） */

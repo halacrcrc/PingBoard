@@ -241,3 +241,38 @@ export function exportFilterHint(f: ExportFilter): string {
       return "仅 sent>0 且 received=0：所有 ping 一次都没成功";
   }
 }
+
+/* ===================== 文件夹范围筛选（v1.1.10） ===================== */
+
+/**
+ * 判断某节点是否落在当前勾选的文件夹范围内。
+ *
+ * 口径：**一个都没勾 = 全部**（不是「什么都不显示」）。
+ * `folder_id` 为 null 表示临时区，与后端 `list_folders` 里 `id === 0` 的
+ * 「临时区」那一项对应，故这里用 `?? 0` 归一。
+ *
+ * 纯函数，便于单测锁住「不勾 = 全部」这条反直觉但已定稿的口径。
+ */
+export function inFolderScope(t: TargetState, scope: ReadonlySet<number>): boolean {
+  if (scope.size === 0) return true;
+  return scope.has(t.folder_id ?? 0);
+}
+
+/** 按文件夹范围过滤节点（侧边栏范围 ∩ 搜索关键词 的第一段） */
+export function filterByFolderScope(
+  targets: TargetState[],
+  scope: ReadonlySet<number>
+): TargetState[] {
+  if (scope.size === 0) return targets;
+  return targets.filter((t) => inFolderScope(t, scope));
+}
+
+/** 切换勾选某一项；返回新集合（不修改入参） */
+export function toggleScope(scope: ReadonlySet<number>, id: number): Set<number> {
+  const next = new Set(scope);
+  if (!next.delete(id)) next.add(id);
+  return next;
+}
+
+/** 文件夹 id 0 固定代表「临时区」（与后端 list_folders 的约定） */
+export const TEMP_AREA_ID = 0;

@@ -3,7 +3,7 @@ import React from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { EventLevel, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
+import type { EventLevel, FolderEntry, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
 import {
   exportFilterLabel,
@@ -13,6 +13,8 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
+import { filterByFolderScope, toggleScope } from "./lib/format";
+import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
 import TargetTable, { type SortKey } from "./components/TargetTable";
@@ -120,6 +122,9 @@ const App: React.FC = () => {
   const [confirmClearLogs, setConfirmClearLogs] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
+  // v1.1.10 文件夹：勾选的文件夹 id；**空集 = 全部**（口径见 docs/folder-design.md 7.1）
+  const [folderScope, setFolderScope] = React.useState<Set<number>>(new Set());
+  const [folders, setFolders] = React.useState<FolderEntry[]>([]);
 
   const audioCtxRef = React.useRef<AudioContext | null>(null);
   /** 保存 ping-snapshot 的取消订阅函数，卸载时判空 + 容错调用 */
@@ -407,6 +412,14 @@ const App: React.FC = () => {
     });
   };
 
+  /** 拉取文件夹列表（侧边栏渲染用；后台每次改文件夹后都要刷新） */
+  const refreshFolders = React.useCallback(() => {
+    api
+      .listFolders()
+      .then(setFolders)
+      .catch((e) => showToast("读取文件夹失败：" + String(e)));
+  }, [showToast]);
+
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -524,16 +537,21 @@ const App: React.FC = () => {
 
   /* ------------------------- 派生数据 ------------------------- */
 
+  // v1.1.10：过滤链 = 侧边栏范围 ∩ 搜索关键词（顺序固定，见 folder-design.md C5）
+  const scopedTargets = React.useMemo(
+    () => filterByFolderScope(snapshot.targets, folderScope),
+    [snapshot.targets, folderScope]
+  );
   const filtered = React.useMemo(() => {
     const kw = search.trim().toLowerCase();
-    if (!kw) return snapshot.targets;
-    return snapshot.targets.filter(
+    if (!kw) return scopedTargets;
+    return scopedTargets.filter(
       (t) =>
         t.name.toLowerCase().includes(kw) ||
         t.host.toLowerCase().includes(kw) ||
         (t.resolved_ip ?? "").toLowerCase().includes(kw)
     );
-  }, [snapshot.targets, search]);
+  }, [scopedTargets, search]);
 
   const primaryTarget = React.useMemo(
     () => snapshot.targets.find((t) => t.id === primaryId) ?? null,
@@ -634,7 +652,38 @@ const App: React.FC = () => {
         onDeleteSelected={requestDeleteSelected}
       />
 
+
       <div className="flex-1 flex min-h-0">
+      <FolderSidebar
+        folders={folders}
+        scope={folderScope}
+        disabled={false}
+        onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}
+        onCreate={(name, color) => {
+          api
+            .createFolder(name, color)
+            .then(refreshFolders)
+            .catch((e) => showToast("新建失败：" + String(e)));
+        }}
+        onRename={(id, name, color) => {
+          api
+            .updateFolder(id, name, color)
+            .then(refreshFolders)
+            .catch((e) => showToast("保存失败：" + String(e)));
+        }}
+        onDelete={(id) => {
+          api
+            .deleteFolder(id, null)
+            .then((n: number) => {
+              showToast(
+                n > 0 ? "已删除文件夹，" + n + " 台主机已移回临时区" : "已删除文件夹"
+              );
+              setFolderScope(new Set());
+            })
+            .then(refreshFolders)
+            .catch((e) => showToast("删除失败：" + String(e)));
+        }}
+      />
         <div className="flex-1 min-w-0 border-r border-slate-200 dark:border-slate-700">
           {snapshot.targets.length === 0 ? (
             <div className="h-full flex items-center justify-center px-6">
