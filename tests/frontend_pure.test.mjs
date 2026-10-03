@@ -1148,6 +1148,56 @@ check("C2 导出范围：结果不含范围外的任何主机 🩸", () => {
     }
   }
 });
+/* ---------- 侧边栏勾选语义（v1.1.10 bug 回归） ---------- */
+
+
+
+check("侧边栏：scope 为空 = 一个都不勾 = 显示全部节点", () => {
+  const ts = [{ id: 1, folder_id: 1 }, { id: 2, folder_id: null }];
+  eq(ts.filter((t) => inFolderScope(t, new Set())).length, 2, "空 scope 必须放行全部");
+});
+
+check("侧边栏：勾选一个文件夹时，勾选框只应如实反映 scope 🩸", () => {
+  // 回归：曾用 `allChecked || scope.has(id)`，导致 scope 为空时把「全部」
+  // 画成「全勾」。于是「回到全部」与「初始状态」长得一模一样 ——
+  // 用户点两次文件夹，看到临时区和文件夹同时被勾选，却没意识到自己已回到全部。
+  const scope = new Set([1]);
+  const on = (id) => scope.has(id);          // 修复后的语义
+  eq(on(1), true, "所选文件夹应勾选");
+  eq(on(0), false, "临时区不应被顺带勾上");
+  eq(on(2), false, "其他文件夹不应被顺带勾上");
+});
+
+check("侧边栏：取消勾选 = 清空 scope，不得用逐个 toggle 🩸", () => {
+  // 回归：曾用 folders.forEach((f) => onToggle(f.folder.id))。
+  // scope={文件夹1} 时，forEach 会先 toggle 临时区（把它勾上）再 toggle 文件夹1，
+  // 结果得到 {临时区} —— 「取消勾选」后反而只剩临时区被选中。
+  const scope = new Set([1]);
+  const buggy = new Set(scope);
+  for (const id of [0, 1, 2]) {
+    if (!buggy.delete(id)) buggy.add(id);
+  }
+  // scope={文件夹1} 时逐个 toggle：文件夹1 被移除，但**没勾的** 0 与 2 被加入
+  eq([...buggy].sort(), [0, 2], "旧实现把没勾的文件夹也勾上了（这正是 bug）");
+  eq(new Set().size, 0, "正确实现是清空 -> 空集合");
+});
+
+check("侧边栏：反复点击同一文件夹回到「未筛选」，且不残留其他 id", () => {
+  let scope = new Set();
+  scope = fmt.toggleScope(scope, 1);
+  eq([...scope], [1], "点一次 -> 只勾它");
+  scope = fmt.toggleScope(scope, 1);
+  eq([...scope].length, 0, "再点一次 -> 回到未筛选，不得残留任何 id");
+});
+
+check("侧边栏：新建文件夹后勾选它，临时区不得被连带勾上", () => {
+  // 新建后 folders = [临时区(0), 新文件夹(1)]，scope 仍为空（=未筛选）。
+  // 用户点新文件夹期望「只看它」，实际必须只有它被勾。
+  let scope = new Set();
+  scope = fmt.toggleScope(scope, 1);
+  const checked = [0, 1].filter((id) => scope.has(id));
+  eq(checked, [1], "只能勾中新文件夹");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

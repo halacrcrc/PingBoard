@@ -68,6 +68,21 @@ pub struct TargetState {
 impl TargetState {
     /// 创建一个新的目标状态（默认启用，状态为未开始）
     pub fn new(id: u64, name: String, host: String) -> Self {
+        Self::new_in_folder(id, name, host, None)
+    }
+
+    /// 创建一个归属指定文件夹的目标（v1.1.10）。
+    ///
+    /// 🩸 存在的理由：原先只有 `new()` 且内部硬编码 `folder_id: None`，
+    /// 导致 `add_targets` 收到前端传来的 `folder_id` 后**直接丢弃** ——
+    /// 用户在「添加主机」里选了文件夹，机器却还是进了临时区。
+    /// `new()` 保留原签名（导出 / 统计测试等 15 处调用点依赖它），委托到这里。
+    pub fn new_in_folder(
+        id: u64,
+        name: String,
+        host: String,
+        folder_id: Option<u64>,
+    ) -> Self {
         Self {
             id,
             name,
@@ -91,7 +106,7 @@ impl TargetState {
             running: false,
             last_error: None,
             events_on: true,
-            folder_id: None,
+            folder_id,
         }
     }
 }

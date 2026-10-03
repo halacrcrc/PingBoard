@@ -594,7 +594,14 @@ impl AppState {
                     name_raw.to_string()
                 };
                 let id = self.inner.next_id.fetch_add(1, Ordering::SeqCst);
-                list.push(Arc::new(Mutex::new(TargetState::new(id, name, host))));
+                // 🩸 必须透传 folder_id：原先调 `TargetState::new` 会把它硬编码成 None，
+                // 导致「添加主机」里选了文件夹却仍进临时区。
+                list.push(Arc::new(Mutex::new(TargetState::new_in_folder(
+                    id,
+                    name,
+                    host,
+                    e.folder_id,
+                ))));
                 ids.push(id);
             }
         }
@@ -1384,6 +1391,82 @@ mod tests {
         //    某台主机会被永久算进临时区且无法被移出。
         assert!(!ids.contains(&0), "主机 id 不得为 0（否则撞临时区哨兵）");
         assert!(a != 0 && b != 0, "文件夹 id 不得为 0（0 保留给临时区）");
+    }
+
+    /// 🩸🩸 回归：`add_targets` **必须**把前端传来的 `folder_id` 落到目标上。
+    ///
+    /// 此前 `add_targets` 调 `TargetState::new(id, name, host)`，而该构造器
+    /// 内部硬编码 `folder_id: None` —— 用户在「添加主机」里选了文件夹，
+    /// 机器却仍然进了临时区。172 条测试一条都没覆盖到这条路径：
+    /// 既有测试要么用 `add_n`（folder_id 恒为 None），要么直接改内存，
+    /// 唯一能暴露问题的「带 folder_id 添加」从来没被写过。
+    #[test]
+    fn qa_v110_add_targets_respects_folder_id() {
+        let st = AppState::new();
+        let a = st.create_folder("机房A", "sky").unwrap();
+        let b = st.create_folder("机房B", "red").unwrap();
+
+        // 一次添加，三种归属混在同一个批次里
+        let ids = st
+            .add_targets(vec![
+                TargetEntry { name: "in-a".into(), host: "10.0.0.1".into(), folder_id: Some(a) },
+                TargetEntry { name: "in-b".into(), host: "10.0.0.2".into(), folder_id: Some(b) },
+                TargetEntry { name: "temp".into(), host: "10.0.0.3".into(), folder_id: None },
+            ])
+            .unwrap();
+        assert_eq!(ids.len(), 3);
+
+        let got: Vec<Option<u64>> = {
+            let list = st.inner.targets.lock().unwrap();
+            list.iter().map(|t| t.lock().unwrap().folder_id).collect()
+        };
+        assert_eq!(
+            got,
+            vec![Some(a), Some(b), None],
+            "🩸 每个目标的 folder_id 必须与提交时一致（None = 临时区）"
+        );
+
+        // 台数侧也要对得上：文件夹 A/B 各 1 台，临时区 1 台
+        let l = st.list_folders();
+        assert_eq!(l[0].folder.name, "临时区");
+        assert_eq!(l[0].count, 1, "临时区应有 1 台");
+        assert_eq!(l[1].count, 1, "机房A 应有 1 台");
+        assert_eq!(l[2].count, 1, "机房B 应有 1 台");
+    }
+
+    /// 归属在「重启后」必须仍然正确（走配置加载路径，与 add_targets 路径相互印证）
+    #[test]
+    fn qa_v110_folder_id_survives_reload() {
+        let st = AppState::new();
+        let a = st.create_folder("机房A", "sky").unwrap();
+        st.add_targets(vec![TargetEntry {
+            name: "h".into(),
+            host: "10.0.0.1".into(),
+            folder_id: Some(a),
+        }])
+        .unwrap();
+
+        // 模拟重启：把当前状态导出成配置，再用配置重建
+        let cfg = st.config();
+        let st2 = AppState::new();
+        st2.init_from_config(&cfg);
+        let f = st2.target_states();
+        assert_eq!(f.len(), 1);
+        assert_eq!(
+            f[0].folder_id,
+            Some(a),
+            "🩸 重启后 folder_id 必须保留（此前只有加载路径正确，添加路径丢弃）"
+        );
+    }
+
+    /// `new_in_folder` 与 `new` 的关系：`new` 仍等价于「临时区」，
+    /// 且 15 处既有调用点（导出 / 统计测试）依赖这个默认值。
+    #[test]
+    fn qa_v110_new_defaults_to_temp_area() {
+        let t = TargetState::new(1, "n".into(), "h".into());
+        assert_eq!(t.folder_id, None, "new() 必须仍默认临时区，不得破坏既有调用点");
+        let t2 = TargetState::new_in_folder(2, "n".into(), "h".into(), Some(7));
+        assert_eq!(t2.folder_id, Some(7));
     }
 
     /// 构造带指定目标数与上限开关的配置（用于并发开关测试）

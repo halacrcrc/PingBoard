@@ -14,6 +14,9 @@ export interface FolderSidebarProps {
   /** 当前勾选的文件夹 id 集合；空 = 全部 */
   scope: ReadonlySet<number>;
   onToggle: (id: number) => void;
+  /** 清空勾选 = 回到「显示全部节点」。**不是**逐个 toggle —— toggle 会把
+   *  当前没勾的文件夹也勾上（scope={A} 时清空会得到 {临时区} 而非 {}）。*/
+  onClearAll: () => void;
   onCreate: (name: string, color: string) => void;
   onRename: (id: number, name: string, color: string) => void;
   onDelete: (id: number) => void;
@@ -51,6 +54,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   folders,
   scope,
   onToggle,
+  onClearAll,
   onCreate,
   onRename,
   onDelete,
@@ -77,16 +81,20 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
         <button
           className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 whitespace-nowrap disabled:opacity-40"
           disabled={allChecked || disabled}
-          title="取消全部勾选 = 显示全部节点"
-          onClick={() => folders.forEach((f) => onToggle(f.folder.id))}
+          title="清空勾选 = 显示全部节点"
+          onClick={onClearAll}
         >
-          {allChecked ? "全部" : "取消勾选"}
+          {allChecked ? "全部（未筛选）" : "取消勾选"}
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
         {folders.map((f) => {
-          const on = allChecked || scope.has(f.folder.id);
+          // 🩸 勾选框**如实反映 scope**，不再让 allChecked 把全部都画成勾选。
+          // 设计的语义是「一个都不勾 = 显示全部节点」；此前却把「全部」画成全勾，
+          // 于是「回到全部」和「初始状态」长得一模一样 —— 用户点了两次文件夹，
+          // 看到临时区和文件夹同时被勾选，却完全没意识到自己已经回到了「全部」。
+          const on = scope.has(f.folder.id);
           const isTemp = f.folder.id === TEMP_AREA_ID;
           return (
             <div

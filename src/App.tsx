@@ -669,6 +669,7 @@ const App: React.FC = () => {
         scope={folderScope}
         disabled={false}
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}
+        onClearAll={() => setFolderScope(new Set())}
         onCreate={(name, color) => {
           api
             .createFolder(name, color)
