@@ -374,6 +374,7 @@ pinginfo/
 │  ├─ events-log-design.md       # 事件日志设计稿
 │  ├─ export-filter-design.md    # 导出筛选设计（判定标准 / 字段表 / 兼容性）
 │  ├─ release-notes-1.1.9.md     # v1.1.9 与 v1.1.8 的完整差异
+│  ├─ release-notes-1.1.10.md    # v1.1.10 与 v1.1.9 的完整差异
 │  └─ reviews/                   # 历次基线复审报告
 ├─ scripts/gen-icon.mjs          # v1.0.0 时期的占位图标脚本（已被 docs/app-icon.svg 流程取代）
 ├─ assets/app-icon.png           # 同上，历史遗留
@@ -440,6 +441,8 @@ pinginfo/
 
 > 逐条对比 v1.1.8 与 v1.1.9 的完整差异（含兼容性判断与升级建议）见
 > [`docs/release-notes-1.1.9.md`](docs/release-notes-1.1.9.md)。
+> v1.1.10（文件夹 + 统计持久化）的完整差异见
+> [`docs/release-notes-1.1.10.md`](docs/release-notes-1.1.10.md)。
 
 ### v1.1.10 — 主机文件夹 + 统计持久化
 

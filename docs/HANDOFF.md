@@ -1,6 +1,6 @@
 # PingBoard 交接文档
 
-> 版本：v1.1.9-dev · 最后更新 2026-10-02 · 面向「新会话 / 新 agent 接手」
+> 版本：v1.1.10 · 最后更新 2026-10-03 · 面向「新会话 / 新 agent 接手」
 > 本文是**接手时的第一个读点**，只做状态交代与索引。细节一律引用专题文档，不在此重复。
 
 ---
@@ -15,12 +15,12 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 
 | 项 | 值 |
 |---|---|
-| 最新发布版本 | **v1.1.9**（tag `v1.1.9` → commit `aa8f883`）—— 三包已发布，见 https://github.com/halacrcrc/PingBoard/releases/tag/v1.1.9 |
-| 当前开发版本 | 🟡 **v1.1.9-dev**（批次 5 报表导出筛选）—— 四处版本号已改 `1.1.9`，**尚未提交、未发版** |
-| 当前 HEAD（仓库侧） | `2bf9a1d`，工作区有本批次的 9 改 + 3 新（未提交） |
-| Rust 测试 | `cargo test --lib` = **154 passed / 0 failed**（143 基线 + 批次 5 的 11 条）；`npx tsc --noEmit` = 0 error；`npm test` = 90 passed |
-| Tauri 命令数 | **19**（原 18，批次 2b 新增 `take_startup_notice`）—— 批次 5 只给 `export_report` **加参数**，未新增命令 |
-| 版本声明位置 | **四处**：`package.json:4`、`src-tauri/tauri.conf.json:4`、`src-tauri/Cargo.toml:3`、`src-tauri/Cargo.lock`（`name = "pingboard"` 段下一行）。**漏 `Cargo.lock` 会「装完还是旧版本号」**；另需改 README |
+| 最新发布版本 | **v1.1.10**（三包已构建验收；tag `v1.1.10` 与 GitHub Release 待发） |
+| 当前开发版本 | **v1.1.10** —— 批次 A-F 全部完成，代码已推送 `origin/main` |
+| 当前 HEAD（仓库侧） | `5ce1dbb`，工作区干净 |
+| Rust 测试 | `cargo test --lib` = **172 passed / 0 failed**；`npm test` = **112 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
+| Tauri 命令数 | **24**（19 → 24，v1.1.10 新增 5 个文件夹命令；导出/添加接口仅加参数） |
+| 版本声明位置 | **五处**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。🩸 **`package-lock.json` 是 v1.1.9 时漏掉的第 5 处**，v1.1.10 已补；另需改 README |
 | 🩸 本环境 cargo 限制 | 沙箱拦 **rustup shim**（`C:\Users\22534\.cargo\bin\cargo.exe`）。改用工具链真 cargo：<br>`$env:PATH = "C:\Users\22534\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;" + $env:PATH`<br>（`node`/`npm`/`npx tsc` 不受影响） |
 | 平台 | **仅 Windows x64，最低 Windows 10**；自 v1.1.8 起随版发布 ARM64 实验包（**未经真机测试**） |
 | 唯一外部运行时依赖 | WebView2 Evergreen Runtime（**不需要** VC++ 运行库 / .NET / `WebView2Loader.dll`） |
@@ -238,6 +238,8 @@ corrupt 备份已删，dev server 与 9333 端口已关，备份与截图在 `C:
 | `docs/code-review.md` | **审查的唯一裁决依据**：三级分级（🔴/🟡/💭）、**14 条红线 R1–R14**、快速/标准/全量三通道、分语言检查清单、反模式速查、意见书写模板 |
 | `docs/events-log-design.md` | 事件日志设计稿（24 KB） |
 | `docs/export-filter-design.md` | **报表导出筛选**（零丢包 / 全部未成功）：判定标准、15 列字段结构、兼容性保证、变异验证记录 |
+| `docs/folder-design.md` | **主机文件夹 + 统计持久化**（v1.1.10 设计定稿）：数据模型、侧边栏交互、兼容性不变量 C1–C3 |
+| `docs/release-notes-1.1.10.md` | **v1.1.10 发布说明**：与 v1.1.9 的逐条差异、行为变更、升级建议 |
 | `docs/reviews/baseline-review-2026-09-29.md` | v1.1.8 基线复审（Rust + 前端 + 汇总） |
 
 ---
