@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events::{self, EventKind, FailSource, LogEvent};
-use crate::model::{AppConfig, PingSettings, Snapshot, Status, TargetConfig, TargetEntry, TargetState};
+use crate::model::{AppConfig, FolderConfig, PingSettings, Snapshot, Status, TargetConfig, TargetEntry, TargetState};
 use crate::pinger::{fallback, Engine};
 use crate::{config, stats};
 
@@ -57,6 +57,8 @@ pub struct Inner {
     /// 有序目标列表（保持添加顺序）
     targets: Mutex<Vec<SharedTarget>>,
     settings: RwLock<PingSettings>,
+    /// 文件夹列表（v1.1.10 新增）。CRUD 命令在批次 B 加，本批次先保证读写往返不丢数据。
+    folders: Mutex<Vec<FolderConfig>>,
     next_id: AtomicU64,
     running: AtomicBool,
     workers: Mutex<HashMap<u64, WorkerHandle>>,
@@ -82,6 +84,7 @@ impl AppState {
             inner: Arc::new(Inner {
                 targets: Mutex::new(Vec::new()),
                 settings: RwLock::new(PingSettings::default()),
+                folders: Mutex::new(Vec::new()),
                 next_id: AtomicU64::new(1),
                 running: AtomicBool::new(false),
                 workers: Mutex::new(HashMap::new()),
@@ -183,6 +186,7 @@ impl AppState {
                         host: g.host.clone(),
                         enabled: g.enabled,
                         events_on: g.events_on,
+                        folder_id: g.folder_id,
                     }
                 })
                 .collect()
@@ -191,6 +195,7 @@ impl AppState {
             version: 1,
             settings: self.inner.settings.read().unwrap().clone(),
             targets,
+            folders: self.inner.folders.lock().unwrap().clone(),
         }
     }
 
@@ -218,7 +223,13 @@ impl AppState {
             let mut state = TargetState::new(id, tc.name.clone(), tc.host.clone());
             state.enabled = tc.enabled;
             state.events_on = tc.events_on;
+            state.folder_id = tc.folder_id;
             list.push(Arc::new(Mutex::new(state)));
+        }
+        drop(list);
+        {
+            let mut fs = self.inner.folders.lock().unwrap();
+            *fs = cfg.folders.clone();
         }
     }
 
@@ -964,8 +975,10 @@ mod tests {
                     host: h.into(),
                     enabled: true,
                     events_on: true,
+                    folder_id: None,
                 })
                 .collect(),
+            folders: Vec::new(),
         }
     }
 
@@ -996,6 +1009,7 @@ mod tests {
                 ui_font_family: None,
             },
             targets: Vec::new(),
+            folders: Vec::new(),
         };
         for i in 0..target_count {
             // 全部使用回环地址，避免依赖外网
@@ -1004,6 +1018,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 enabled: true,
                 events_on: true,
+                folder_id: None,
             });
         }
         cfg

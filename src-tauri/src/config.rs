@@ -76,7 +76,53 @@ fn finalize(mut cfg: AppConfig) -> AppConfig {
     if cfg.version == 0 {
         cfg.version = 1;
     }
+    resolve_orphan_folders(&mut cfg);
     cfg
+}
+
+/// 把指向**不存在**文件夹的主机回落为「临时区」（`folder_id = None`）。
+///
+/// 🩸 这是 v1.1.10 文件夹功能里最关键的一条防丢主机措施（红线 R1 的直接应用）。
+///
+/// 触发场景：手工编辑配置、文件夹被删但配置未同步、配置从旧版本迁移。
+/// 若不回落，这些主机会指向一个不存在的 id，在界面上**无处可寻**——
+/// 用户会以为主机「丢了」，而这正是本项目最贵的那类事故。
+///
+/// 正确做法：**降级单个字段**，绝不跳过该主机。
+///
+/// 纯函数（不改 I/O），便于单测锁定。返回被回落的主机台数，仅供日志与测试观察。
+pub fn resolve_orphan_folders(cfg: &mut AppConfig) -> usize {
+    let valid: std::collections::HashSet<u64> = cfg.folders.iter().map(|f| f.id).collect();
+    if valid.is_empty() {
+        // 没有文件夹时，所有非 None 的 folder_id 都是孤儿
+        let n = cfg.targets.iter().filter(|t| t.folder_id.is_some()).count();
+        if n > 0 {
+            eprintln!(
+                "[pingboard] 配置中 {} 台主机指向不存在的文件夹，已回落为临时区",
+                n
+            );
+        }
+        for t in cfg.targets.iter_mut() {
+            t.folder_id = None;
+        }
+        return n;
+    }
+    let mut moved = 0usize;
+    for t in cfg.targets.iter_mut() {
+        if let Some(fid) = t.folder_id {
+            if !valid.contains(&fid) {
+                t.folder_id = None;
+                moved += 1;
+            }
+        }
+    }
+    if moved > 0 {
+        eprintln!(
+            "[pingboard] 配置中 {} 台主机指向不存在的文件夹，已回落为临时区",
+            moved
+        );
+    }
+    moved
 }
 
 /// 把损坏的配置文件复制一份带时间戳的备份，给用户留手工恢复的余地。
@@ -180,6 +226,112 @@ pub fn save(app: &AppHandle, cfg: &AppConfig) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    /* ============ v1.1.10 文件夹：零迁移与防丢主机 ============ */
+
+    /// 零迁移（红线 R1 最核心的保证）：v1.1.9 写出的配置**没有** folders / folder_id，
+    /// 加载后必须成功、全部主机落在临时区、行为与 v1.1.9 完全一致。
+    ///
+    /// 🩸 本用例带**前提守卫**：先断言这段文本在 v1.1.9 语义下确实是合法的，
+    /// 且不含任何新字段 —— 否则将来有人给测试文本加了新字段，用例会静默失效。
+    #[test]
+    fn qa_v110_legacy_config_without_folders_loads_into_temp_area() {
+        let legacy = r#"{"version":1,"settings":{"interval_ms":1500},
+            "targets":[{"name":"A","host":"10.0.0.1","enabled":true,"events_on":true},
+                       {"name":"B","host":"10.0.0.2","enabled":false,"events_on":false}]}"#;
+        // 前提守卫：文本里确实没有新字段
+        assert!(!legacy.contains("folders"), "前提：旧配置文本不应含 folders");
+        assert!(!legacy.contains("folder_id"), "前提：旧配置文本不应含 folder_id");
+        // 前提守卫：旧配置本身是合法 JSON（能被解析），保证这不是「损坏」用例
+        assert!(
+            serde_json::from_str::<serde_json::Value>(legacy).is_ok(),
+            "前提：这段旧配置必须是合法 JSON"
+        );
+
+        let (cfg, notice) = parse_with_recovery(legacy);
+        assert!(notice.is_none(), "合法旧配置不得产生损坏提示：{:?}", notice);
+        assert_eq!(cfg.targets.len(), 2, "两台主机必须都在");
+        assert_eq!(cfg.settings.interval_ms, 1500, "设置必须保留");
+        assert!(cfg.folders.is_empty(), "旧配置的 folders 应为空数组");
+        for t in &cfg.targets {
+            assert!(
+                t.folder_id.is_none(),
+                "旧配置的主机必须落在临时区（folder_id=None），实际 {:?}",
+                t.folder_id
+            );
+        }
+    }
+
+    /// 🩸 孤儿主机回落：folder_id 指向**不存在**的文件夹时，主机必须**回落为临时区**，
+    /// 绝不能被跳过。这是防止「主机莫名消失」的核心防丢措施。
+    #[test]
+    fn qa_v110_orphan_folder_id_falls_back_and_keeps_host() {
+        let text = r#"{"version":1,"folders":[{"id":1,"name":"机房A","color":"sky"}],
+            "targets":[{"name":"正常","host":"10.0.0.1","enabled":true,"folder_id":1},
+                       {"name":"孤儿","host":"10.0.0.2","enabled":true,"folder_id":999}]}"#;
+        let (cfg, notice) = parse_with_recovery(text);
+        assert!(notice.is_none(), "这不是损坏配置，不该有提示");
+        assert_eq!(cfg.targets.len(), 2, "孤儿主机必须仍然被加载，不得消失");
+        assert_eq!(cfg.targets[0].folder_id, Some(1), "有效 folder_id 必须保留");
+        assert_eq!(
+            cfg.targets[1].folder_id, None,
+            "指向不存在文件夹的 folder_id 必须回落为 None（临时区）"
+        );
+    }
+
+    /// folders 里混入非法元素（null / 数字 / 字符串）时，**逐个跳过**，
+    /// 且**不得**让整份配置解析失败、不得牵连 targets（与 targets 承重职责的区别）。
+    #[test]
+    fn qa_v110_bad_folder_entries_skipped_without_breaking_targets() {
+        let text = r#"{"version":1,
+            "folders":[{"id":1,"name":"好文件夹","color":"emerald"},null,42,"也可能是字符串"],
+            "targets":[{"name":"必须保住","host":"10.0.0.1","enabled":true}]}"#;
+        let (cfg, notice) = parse_with_recovery(text);
+        assert!(
+            notice.is_none(),
+            "坏文件夹不得触发「配置已损坏」提示（它不是配置文件）：{:?}",
+            notice
+        );
+        assert_eq!(cfg.folders.len(), 1, "只应保留那 1 个合法文件夹");
+        assert_eq!(cfg.folders[0].name, "好文件夹");
+        assert_eq!(cfg.targets.len(), 1, "主机必须完好无损");
+    }
+
+    /// 未知 / 缺失 / 乱写的 color 一律降级为 slate，**不报错**（枚举容错口径）。
+    #[test]
+    fn qa_v110_unknown_color_degrades_to_slate() {
+        let text = r#"{"version":1,
+            "folders":[{"id":1,"name":"A","color":"不存在的颜色"},
+                       {"id":2,"name":"B"},
+                       {"id":3,"name":"C","color":"VIOLET"}]}"#;
+        let (cfg, _) = parse_with_recovery(text);
+        assert_eq!(cfg.folders.len(), 3, "三个文件夹都应保留");
+        assert_eq!(cfg.folders[0].color, "slate", "未知颜色降级为 slate");
+        assert_eq!(cfg.folders[1].color, "slate", "缺失颜色降级为 slate");
+        assert_eq!(
+            cfg.folders[2].color, "violet",
+            "大小写不敏感：VIOLET 应被接受"
+        );
+    }
+
+    /// folder_id 的容错：null / 布尔 / 无法解析的字符串 → None（临时区）；
+    /// 数字与数字字符串 → 正常解析。
+    #[test]
+    fn qa_v110_folder_id_tolerance() {
+        let text = r#"{"version":1,"folders":[{"id":7,"name":"A","color":"teal"}],
+            "targets":[{"name":"n","host":"10.0.0.1","enabled":true,"folder_id":"7"},
+                       {"name":"n2","host":"10.0.0.2","enabled":true,"folder_id":7},
+                       {"name":"n3","host":"10.0.0.3","enabled":true,"folder_id":null},
+                       {"name":"n4","host":"10.0.0.4","enabled":true,"folder_id":true},
+                       {"name":"n5","host":"10.0.0.5","enabled":true,"folder_id":"不是数字"}]}"#;
+        let (cfg, notice) = parse_with_recovery(text);
+        assert!(notice.is_none(), "全部应被容错吸收，不该报错：{:?}", notice);
+        assert_eq!(cfg.targets.len(), 5, "五台主机都必须保住");
+        assert_eq!(cfg.targets[0].folder_id, Some(7), "数字字符串应解析成功");
+        assert_eq!(cfg.targets[1].folder_id, Some(7), "数字应解析成功");
+        assert_eq!(cfg.targets[2].folder_id, None, "null 应为临时区");
+        assert_eq!(cfg.targets[3].folder_id, None, "布尔应降级为临时区");
+        assert_eq!(cfg.targets[4].folder_id, None, "非法字符串应降级为临时区");
+    }
     use super::*;
 
     /// 造一个进程唯一的临时目录，测试结束后清理

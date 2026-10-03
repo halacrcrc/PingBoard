@@ -54,8 +54,17 @@ pub struct TargetState {
     pub last_error: Option<String>,
     /// 是否记录该主机的事件（运行时单主机开关，默认开启）
     pub events_on: bool,
+    /// 所属文件夹 id；`None` = 临时区（未分类区域）。
+    ///
+    /// 必须带 `default`（红线 R1）：v1.1.9 写出的配置**没有**这个字段，
+    /// 缺省必须是 `None`（= 全部落在临时区），否则旧配置整份反序列化失败、
+    /// 回落默认值 → **丢用户全部主机列表**。这是零迁移的前提。
+    ///
+    /// 指向**不存在**的文件夹时**不得**跳过该主机，必须回落为 `None`：
+    /// 见 `config::finalize` 的孤儿回落。红线 R1 的教训是「宁可降级一个字段」。
+    #[serde(default, deserialize_with = "deserialize_folder_id")]
+    pub folder_id: Option<u64>,
 }
-
 impl TargetState {
     /// 创建一个新的目标状态（默认启用，状态为未开始）
     pub fn new(id: u64, name: String, host: String) -> Self {
@@ -82,6 +91,7 @@ impl TargetState {
             running: false,
             last_error: None,
             events_on: true,
+            folder_id: None,
         }
     }
 }
@@ -452,6 +462,136 @@ pub struct TargetConfig {
         deserialize_with = "deserialize_target_events_on"
     )]
     pub events_on: bool,
+    /// 所属文件夹 id；`None` = 临时区（未分类区域）。
+    ///
+    /// 必须带 `default`（红线 R1）：v1.1.9 写出的配置**没有**这个字段，
+    /// 缺省必须是 `None`（= 全部落在临时区），否则旧配置整份反序列化失败、
+    /// 回落默认值 → **丢用户全部主机列表**。这是零迁移的前提。
+    ///
+    /// 指向**不存在**的文件夹时**不得**跳过该主机，必须回落为 `None`：
+    /// 见 `config::finalize` 的孤儿回落。红线 R1 的教训是「宁可降级一个字段」。
+    #[serde(default, deserialize_with = "deserialize_folder_id")]
+    pub folder_id: Option<u64>,
+}
+/// 文件夹（v1.1.10 新增）：主机分组，用于把「临时区」与长期管理的 IP 分开。
+///
+/// 🩸 每个字段都带 serde 默认值 + 类型容错（红线 R1）：
+/// 手改配置时把 `id` 写成字符串、或 `name` 漏写，都**不得**让整份配置解析失败。
+/// `color` 未知值降级为 `slate`（见 `normalize_folder_color`）。
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FolderConfig {
+    #[serde(default, deserialize_with = "deserialize_folder_id_field")]
+    pub id: u64,
+    #[serde(default, deserialize_with = "deserialize_folder_name")]
+    pub name: String,
+    /// 预设色板 key（slate/sky/emerald/amber/red/violet/pink/teal），**不是自由 hex**
+    #[serde(default = "default_folder_color", deserialize_with = "deserialize_folder_color")]
+    pub color: String,
+}
+
+fn default_folder_color() -> String {
+    FOLDER_COLOR_SLATE.to_string()
+}
+
+/// 预设色板全部合法取值；未知值一律降级为 `slate`（不报错，与项目枚举容错口径一致）
+pub const FOLDER_COLORS: [&str; 8] = [
+    "slate", "sky", "emerald", "amber", "red", "violet", "pink", "teal",
+];
+pub const FOLDER_COLOR_SLATE: &str = "slate";
+
+/// 未知 / 缺失的 color 归一为 `slate`。**纯函数**，便于单测锁定。
+pub fn normalize_folder_color(c: &str) -> String {
+    let k = c.trim().to_ascii_lowercase();
+    if FOLDER_COLORS.contains(&k.as_str()) {
+        k
+    } else {
+        FOLDER_COLOR_SLATE.to_string()
+    }
+}
+
+/// `FolderConfig.id` 的容错：收 Number（可转 u64）或数字字符串；其余形态回落 0。
+/// ⚠️ 回落 0 意味着该文件夹**不可被引用**（没有主机能指向它），
+/// 但它本身仍会出现在列表里 —— 宁可显示一个空文件夹，也不要静默丢数据。
+fn deserialize_folder_id_field<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    Ok(match v.as_ref() {
+        Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<u64>().unwrap_or(0),
+        _ => 0,
+    })
+}
+
+/// `TargetConfig.folder_id` 的容错：只收 Number 与数字字符串；
+/// `null` / 缺失 / 布尔 / 其他 → `None`（= 临时区）。
+///
+/// ⚠️ 刻意**不**把无法解析的形态变成 `Some(0)`：那会让主机被归到一个
+/// 名为「未分类」的假文件夹里，比留在临时区更让人困惑。
+fn deserialize_folder_id<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    Ok(match v.as_ref() {
+        Some(serde_json::Value::Number(n)) => n.as_u64(),
+        Some(serde_json::Value::String(s)) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+/// `FolderConfig.name` 的容错：保形优先（数字/布尔转字符串），无法保形才回落空串。
+/// 空名会在界面上显示为「(未命名)」，但文件夹本身与其中的主机都不丢。
+fn deserialize_folder_name<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    Ok(match v.as_ref() {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Number(n)) => n.to_string(),
+        Some(serde_json::Value::Bool(b)) => b.to_string(),
+        _ => String::new(),
+    })
+}
+
+/// `FolderConfig.color` 的容错：任何形态都不失败，未知值降级为 `slate`
+fn deserialize_folder_color<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    let s = match v.as_ref() {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        _ => String::new(),
+    };
+    Ok(normalize_folder_color(&s))
+}
+
+/// `AppConfig.folders` 的容错：**逐元素**跳过非法项，数组本身无法解析时回落空数组。
+///
+/// ⚠️ 与 `AppConfig.targets` 的关键区别（见 `docs/folder-design.md` 4.2）：
+/// `targets` 是**承重结构**，绝不能静默跳过非法元素（那会让备份+抢救的触发器消失）；
+/// 而 `folders` 不承担该职责 —— 这里跳过坏元素，使「文件夹写坏了」**不连带影响主机列表**。
+pub fn deserialize_folders<'de, D>(deserializer: D) -> Result<Vec<FolderConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = Option::<serde_json::Value>::deserialize(deserializer).unwrap_or(None);
+    let arr = match v {
+        Some(serde_json::Value::Array(a)) => a,
+        // null / 缺失 / 类型不符 → 空数组（绝不返回 Err）
+        _ => return Ok(Vec::new()),
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for item in arr {
+        // 逐元素用 serde_json 自行解析：非法元素直接跳过，不影响其余
+        if let Ok(f) = serde_json::from_value::<FolderConfig>(item) {
+            out.push(f);
+        }
+    }
+    Ok(out)
 }
 
 fn default_enabled() -> bool {
@@ -489,6 +629,9 @@ pub struct AppConfig {
     pub settings: PingSettings,
     #[serde(default)]
     pub targets: Vec<TargetConfig>,
+    /// 文件夹列表（v1.1.10 新增）。缺省 = 空数组 = 行为与 v1.1.9 完全一致。
+    #[serde(default, deserialize_with = "deserialize_folders")]
+    pub folders: Vec<FolderConfig>,
 }
 
 impl Default for AppConfig {
@@ -497,6 +640,7 @@ impl Default for AppConfig {
             version: 1,
             settings: PingSettings::default(),
             targets: Vec::new(),
+            folders: Vec::new(),
         }
     }
 }
@@ -597,9 +741,10 @@ mod tests {
                 ..PingSettings::default()
             },
             targets: vec![
-                TargetConfig { name: "阿里 DNS".into(), host: "223.5.5.5".into(), enabled: true, events_on: true },
-                TargetConfig { name: "百度".into(), host: "www.baidu.com".into(), enabled: false, events_on: true },
+                TargetConfig { name: "阿里 DNS".into(), host: "223.5.5.5".into(), enabled: true, events_on: true, folder_id: None },
+                TargetConfig { name: "百度".into(), host: "www.baidu.com".into(), enabled: false, events_on: true, folder_id: None },
             ],
+            folders: Vec::new(),
         };
         let js = serde_json::to_string_pretty(&cfg).unwrap();
         let back: AppConfig = serde_json::from_str(&js).unwrap();
