@@ -34,6 +34,14 @@ Windows 多主机 Ping 监视器，对标 NirSoft **PingInfoView**。
 Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势图原生 SVG）。界面简体中文、默认浅色。
 
 ## 硬性约定（改动前必读）
+- **新增功能必须先做「兼容性冲突检查」**：逐条对照既有功能与规则，确认不冲突、不破坏兼容性。
+  至少覆盖五类：①既有数据/配置格式 ②既有语义与口径（如查重、筛选作用域）
+  ③既有 UI 与交互约定 ④既有红线与不可逆约定 ⑤既有测试断言。
+  把检查结论写进设计文档的「兼容性冲突检查」小节，**并明确列出「需用户拍板的点」**。
+  典型反例（来自 v1.1.10 文件夹功能的实际检查）：同一 host 能否同时存在于两个文件夹会
+  改变既有「全局查重」规则；侧边栏会改变导出对话框「全部节点」的含义；统计持久化若不
+  同步删文件，「清空统计」会在重启后失效。
+- **ICMP 只能用 Win32 IP Helper `IcmpSendEcho`**（`windows` 0.61）。禁 raw socket / surge-ping。
 - **ICMP 只能用 Win32 IP Helper `IcmpSendEcho`**（`windows` 0.61）。禁 raw socket / surge-ping。
 - 所有 spawn 子进程处必须带 `CREATE_NO_WINDOW (0x0800_0000)`。
 - 契约：**18 个 Tauri 命令**（v1.1.7-dev 起 +`list_system_fonts`，winreg 0.55 读注册表枚举字体）+ 事件
