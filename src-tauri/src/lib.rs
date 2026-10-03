@@ -8,6 +8,7 @@ mod import;
 mod model;
 mod pinger;
 mod state;
+mod stats_store;
 mod stats;
 
 use tauri::Manager;
@@ -62,8 +63,25 @@ pub fn run() {
                 st.load_events_from_file();
             }
 
+            // 1.2) 统计持久化：注入目录并读回上次运行的累计统计与趋势
+            //      （未清空统计就关应用时，重启后数据仍在）
+            if let Ok(base_dir) = config::app_config_dir(&handle) {
+                let st = app.state::<state::AppState>();
+                st.configure_stats(base_dir);
+            }
+
             // 2) 启动聚合快照发射任务（每 500ms 一次）
             state::spawn_snapshot_emitter(handle.clone());
+
+            // 2.1) 统计定时落盘（每 30s 一次）：防异常退出 / 断电丢数据
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                    let st = handle.state::<state::AppState>();
+                    st.save_stats_to_file();
+                });
+            }
 
             // 3) 自动开始（可选）
             if cfg.settings.auto_start {

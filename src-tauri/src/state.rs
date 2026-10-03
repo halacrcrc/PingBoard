@@ -59,6 +59,10 @@ pub struct Inner {
     settings: RwLock<PingSettings>,
     /// 文件夹列表（v1.1.10 新增）。CRUD 命令在批次 B 加，本批次先保证读写往返不丢数据。
     folders: Mutex<Vec<FolderConfig>>,
+    /// 统计持久化：待保存的统计快照（key = 目标 id）
+    stats_store: Mutex<HashMap<u64, crate::stats_store::TargetStats>>,
+    /// 统计文件所在目录（app_config_dir；由 setup 注入）
+    stats_base_dir: Mutex<Option<PathBuf>>,
     next_id: AtomicU64,
     running: AtomicBool,
     workers: Mutex<HashMap<u64, WorkerHandle>>,
@@ -85,6 +89,8 @@ impl AppState {
                 targets: Mutex::new(Vec::new()),
                 settings: RwLock::new(PingSettings::default()),
                 folders: Mutex::new(Vec::new()),
+                stats_store: Mutex::new(HashMap::new()),
+                stats_base_dir: Mutex::new(None),
                 next_id: AtomicU64::new(1),
                 running: AtomicBool::new(false),
                 workers: Mutex::new(HashMap::new()),
@@ -333,6 +339,93 @@ impl AppState {
     }
 
     /// 新增目标，返回新分配的 id 列表；若全局正在运行则自动开始 ping
+    /* --------------------- 统计持久化（v1.1.10） --------------------- */
+
+    /// 注入统计文件目录并从磁盘读回历史统计（启动时调用一次）
+    pub fn configure_stats(&self, base_dir: PathBuf) {
+        *self.inner.stats_base_dir.lock().unwrap() = Some(base_dir);
+        self.load_stats_from_file();
+    }
+
+    /// 从磁盘读回统计并写进各目标状态。
+    ///
+    /// 只对**配置里已有**的目标生效（按 id 匹配）；文件里多出来的条目
+    /// 会被忽略（目标已删），缺失的条目保持零值。
+    pub fn load_stats_from_file(&self) {
+        let dir = match self.inner.stats_base_dir.lock().unwrap().clone() {
+            Some(d) => d,
+            None => return,
+        };
+        let map = crate::stats_store::load(&dir);
+        if map.is_empty() {
+            return;
+        }
+        let list = self.inner.targets.lock().unwrap();
+        let mut restored = 0usize;
+        for t in list.iter() {
+            let mut g = t.lock().unwrap();
+            if let Some(s) = map.get(&g.id) {
+                s.apply_to_state(&mut g);
+                restored += 1;
+            }
+        }
+        drop(list);
+        eprintln!("[pingboard] 已从统计文件恢复 {} 台主机的统计", restored);
+    }
+
+    /// 把当前统计写入内存待存表（不落盘）。
+    ///
+    /// 由 500ms 快照发射任务调用 —— 这样退出/停止时只需落盘一次，
+    /// 不必在高频路径里做文件 IO。
+    pub fn capture_stats(&self) {
+        let list = self.inner.targets.lock().unwrap();
+        let mut m: HashMap<u64, crate::stats_store::TargetStats> = HashMap::new();
+        for t in list.iter() {
+            let g = t.lock().unwrap();
+            m.insert(g.id, crate::stats_store::TargetStats::from_state(&g));
+        }
+        drop(list);
+        *self.inner.stats_store.lock().unwrap() = m;
+    }
+
+    /// 落盘统计。`dir` 为 None（未注入）时静默跳过。
+    ///
+    /// 写失败只打印告警，**不得**让退出 / 停止流程失败。
+    pub fn save_stats_to_file(&self) {
+        let dir = match self.inner.stats_base_dir.lock().unwrap().clone() {
+            Some(d) => d,
+            None => return,
+        };
+        self.capture_stats();
+        let ids: Vec<u64> = {
+            let list = self.inner.targets.lock().unwrap();
+            list.iter().map(|t| t.lock().unwrap().id).collect()
+        };
+        let map = self.inner.stats_store.lock().unwrap().clone();
+        let history_len = self.inner.settings.read().unwrap().history_len;
+        if let Err(e) = crate::stats_store::save(&dir, &map, &ids, history_len) {
+            eprintln!("[pingboard] 保存统计失败：{}", e);
+        }
+    }
+
+    /// 「清空统计」时删除统计文件（兼容性检查 C3）。
+    ///
+    /// 🩸 必须是**删除文件**而不是写空：写空的话重启后仍会读回一个空文件，
+    /// 用户会以为「清空统计」没生效。删除后重启读不到文件，静默当作空统计。
+    pub fn clear_stats_file(&self) {
+        if let Some(d) = self.inner.stats_base_dir.lock().unwrap().clone() {
+            crate::stats_store::clear(&d);
+        }
+    }
+
+    /// 目标被删除时剔除其待存统计条目（否则文件会随使用无限膨胀）
+    pub fn prune_stats(&self, ids: &[u64]) {
+        let mut m = self.inner.stats_store.lock().unwrap();
+        for id in ids {
+            m.remove(id);
+        }
+    }
+
     /* --------------------- 文件夹（v1.1.10） --------------------- */
 
     /// 文件夹列表（含每个文件夹与临时区的台数），供侧边栏渲染。
@@ -522,6 +615,8 @@ impl AppState {
         self.stop(Some(ids.to_vec()), StopReason::Internal);
         let mut list = self.inner.targets.lock().unwrap();
         list.retain(|t| !ids.contains(&t.lock().unwrap().id));
+        // 目标已删除，剔除其待存统计，避免统计文件随使用无限膨胀
+        self.prune_stats(ids);
     }
 
     /// 修改目标（备注名 / 主机名 / 启用状态）
@@ -774,6 +869,8 @@ impl AppState {
             g.last_error = None;
             g.status = Status::Idle;
         }
+        // v1.1.10 统计持久化：清空统计必须同步删文件，否则重启后旧统计复活（C3）
+        self.clear_stats_file();
     }
 
     /* ----------------------------- 设置 ----------------------------- */
