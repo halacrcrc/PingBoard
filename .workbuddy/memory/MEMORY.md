@@ -57,7 +57,7 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势
 - **git 仓库：`C:\Users\22534\WorkBuddy\pinginfo`**（有 `.git`/`LICENSE`/`docs/`/`交付包/`）。
 - **`D:\pinginfo` 只是构建工作区**（有 node_modules/target/dist，**没有 `.git`**）；改配置/构建在 D 盘，
   文档改动三处同步（仓库 / D 盘 / `交付包/`）。
-- `tauri.conf.json` **基线 md5 = `f180c1189ea47f41869b90ba86b4f5a2`（v1.1.10 起，两侧须始终一致）**；提版本后须重记
+- `tauri.conf.json` **基线 md5 = `db16ab49a6e825f1bf6f4677efd36b08`（v1.2 起，两侧须始终一致）**；提版本后须重记
   （v1.1.8 时期旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。⚠️ 打包变体时只改**构建侧 D 盘**的
   `webviewInstallMode`，构造完立刻还原（两侧 md5 必须一致）。
 
