@@ -330,12 +330,21 @@ export function folderCounts(
 ): Map<number, number> {
   const m = new Map<number, number>();
   const bump = (k: number) => m.set(k, (m.get(k) ?? 0) + 1);
+  // 🩸 `validFolderIds` 为空集时**不做孤儿回落**。
+  //
+  // 理由：空集有两种含义 ——「确实一个文件夹都没有」与「列表还没加载」。
+  // 前者无害（此时所有主机 folder_id 本来就是 null，全在临时区）；
+  // 后者致命：把「还没加载」当成「都不合法」，会让**所有**文件夹内主机
+  // 被算进临时区，台数全错。宁可少回落（那一行暂时不显示）也不可错回落。
+  //
+  // 真正的孤儿回落只在拿到非空合法集合后才启用。
+  const loaded = validFolderIds !== undefined && validFolderIds.size > 0;
   for (const t of targets) {
     const raw = t.folder_id;
     if (raw === null || raw === undefined) {
       bump(0);
-    } else if (validFolderIds && !validFolderIds.has(raw)) {
-      // 🩸 失效的 folder_id（配置被手改等）必须归入临时区，与后端
+    } else if (loaded && !validFolderIds!.has(raw)) {
+      // 失效的 folder_id（配置被手改等）归入临时区，与后端
       // `folder_counts` + `list_folders` 同口径。前端无法自行区分
       // 「孤儿 id」与「真实但恰好同号的 id」，故需调用方传入合法 id 集合。
       bump(0);

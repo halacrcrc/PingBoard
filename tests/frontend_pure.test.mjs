@@ -1248,6 +1248,34 @@ check("台数：未传 validFolderIds 时按原样统计（向后兼容）", () 
   eq(c.get(7), 1, "不传集合时不做回落判定");
 });
 
+check("台数：validFolderIds 为空集时不做孤儿回落 🩸", () => {
+  // 用户报告的 bug：启动时侧边栏看不到任何文件夹，文件夹内主机的台数
+  // 全被算到「临时区」头上。根因是启动未加载 folders -> realFolderIds 为空集
+  // -> 初版把「集合为空」当成「所有 id 都非法」，全量回落。
+  // 空集必须视为「尚未加载」而非「都不合法」。
+  const c = folderCounts(
+    [{ folder_id: 1 }, { folder_id: 1 }, { folder_id: 2 }, { folder_id: null }],
+    new Set()
+  );
+  eq(c.get(0), 1, "只有真正 folder_id=null 的那台在临时区");
+  eq(c.get(1), 2, "文件夹1 的 2 台不得被算进临时区");
+  eq(c.get(2), 1, "文件夹2 的 1 台不得被算进临时区");
+});
+
+check("台数：拿到非空合法集合后才启用孤儿回落", () => {
+  const valid = new Set([1]);
+  const c = folderCounts([{ folder_id: 1 }, { folder_id: 999 }], valid);
+  eq(c.get(1), 1, "合法文件夹");
+  eq(c.get(0), 1, "999 是孤儿 -> 归临时区");
+  eq(c.get(999), undefined, "不得为孤儿生成独立计数");
+});
+
+check("台数：一个文件夹都没有时全部落在临时区（空集回落无害）", () => {
+  // 前者无害：此时所有主机 folder_id 本来就是 null，结果与回落一致。
+  const c = folderCounts([{ folder_id: null }, { folder_id: null }], new Set());
+  eq(c.get(0), 2, "全在临时区");
+});
+
 check("台数：结果与 listFolders 的 count 在静态数据上必须一致", () => {
   // 两套算法（后端 folder_counts / 前端 folderCounts）口径必须相同，
   // 否则切换到实时统计后会出现台数跳变。

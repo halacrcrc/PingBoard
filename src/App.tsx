@@ -227,6 +227,20 @@ const App: React.FC = () => {
       .getState()
       .then(handleSnapshot)
       .catch((e) => showToast(`初始化失败：${String(e)}`));
+    // 🩸 启动时必须拉一次文件夹列表。
+    // 此前只在「新建/改名/删除文件夹」和「添加主机」后刷新，导致启动时
+    // folders 为空数组 —— 侧边栏一行都不渲染（用户看到「打开应用看不到
+    // 文件夹」），更糟的是 realFolderIds 随之为空，folderCounts 会把
+    // **所有**文件夹内主机当成孤儿归入临时区，台数全算到「临时区」头上。
+    // 两个现象同一个根因。
+    //
+    // ⚠️ 这里刻意不复用 refreshFolders：它声明在本 effect 之后（受 showToast
+    // 依赖链约束），引用它会触发 TS2448/TS2454（TDZ）。故直接调 api。
+    // 两者逻辑必须保持一致 —— 改一处记得改另一处。
+    api
+      .listFolders()
+      .then(setFolders)
+      .catch((e) => showToast("读取文件夹失败：" + String(e)));
     // 启动期一次性提示（配置损坏 / 已备份原文件 / 抢救结果）：
     // 后端读走即清空，所以这里不需要做任何去重；没提示时后端返回 null。
     // 文案含完整的备份文件路径，20 秒才够用户看清并记下（默认 4 秒会被 truncate 吃掉路径）。
@@ -412,7 +426,7 @@ const App: React.FC = () => {
     });
   };
 
-  /** 拉取文件夹列表（侧边栏渲染用；后台每次改文件夹后都要刷新） */
+  /** 拉取文件夹列表（侧边栏渲染用；启动时 + 每次改文件夹后都要刷新） */
   const refreshFolders = React.useCallback(() => {
     api
       .listFolders()
