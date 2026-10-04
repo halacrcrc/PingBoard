@@ -6,7 +6,7 @@
 //   * 只做筛选，**不隐藏任何既有功能入口**；主表 13 列布局与排序完全不动
 import React from "react";
 import type { FolderEntry } from "../types";
-import { TEMP_AREA_ID, toggleScope } from "../lib/format";
+import { sidebarCount, TEMP_AREA_ID, toggleScope } from "../lib/format";
 import ConfirmDialog from "./ConfirmDialog";
 
 export interface FolderSidebarProps {
@@ -85,8 +85,9 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
     return m;
   }, [folders]);
 
-  // 实时台数：优先用 counts（来自快照），无 counts 时退回 listFolders 的 count
-  const countOf = (id: number) => counts?.get(id) ?? fallbackCounts.get(id) ?? 0;
+  // 实时台数。实现见 format.ts 的 sidebarCount（抽成纯函数才能被单测覆盖 ——
+  // 之前它作为组件内局部函数，测试文件里的复刻副本测不到真实代码）。
+  const countOf = (id: number) => sidebarCount(counts, fallbackCounts, id);
   const total = folders.reduce((a, f) => a + countOf(f.folder.id), 0);
   const allChecked = scope.size === 0;
   return (
@@ -212,6 +213,24 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
               </div>
             </div>
             <div className="px-4 h-12 flex items-center justify-end gap-2 border-t border-slate-200 dark:border-slate-700">
+              {/* 🩸 删除入口。此前删除逻辑（askDelete + ConfirmDialog + onDelete）
+                  全部实现完毕却**没有任何触发点** —— `⋯` 只调 setEdit(重命名)，
+                  用户完全无法删除文件夹。放在这个对话框里是最小改动：
+                  不新增浮层结构，也就不涉及 R7 的 zoom 定位适配。 */}
+              {edit.id !== null && (
+                <button
+                  className="mr-auto px-2 h-7 rounded border text-[12px] leading-none border-red-300 dark:border-red-800 bg-white dark:bg-slate-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40"
+                  title="删除这个文件夹（其中的主机会移到临时区，不会被删除）"
+                  onClick={() => {
+                    const target = folders.find((x) => x.folder.id === edit.id);
+                    setEdit(null);
+                    // 找不到对应项（列表已刷新）时无事可做，勿弹空确认框
+                    if (target) setAskDelete(target);
+                  }}
+                >
+                  删除文件夹
+                </button>
+              )}
               <button className={btnNeutral} onClick={() => setEdit(null)}>取消</button>
               <button
                 className={btnPrimary}
@@ -240,7 +259,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
             <>
               将删除文件夹「{askDelete.folder.name || "(未命名)"}」。
               <br />
-              <b>其中的 {askDelete.count} 台主机不会被删除</b>，会移到「临时区」。
+              <b>其中的 {countOf(askDelete.folder.id)} 台主机不会被删除</b>，会移到「临时区」。
             </>
           )
         }

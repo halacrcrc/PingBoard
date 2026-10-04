@@ -1325,6 +1325,52 @@ check("台数同步：新建空文件夹显示 0 而非 undefined", () => {
   eq(c.get(3) ?? 0, 0, "未出现过的文件夹应为 0");
   eq(c.get(3), undefined, "确认它确实不在 Map 里（渲染层负责兜底成 0）");
 });
+/* ---------- 侧边栏台数渲染：?? 穿透回归（用户截图 bug） ---------- */
+
+// ⚠️ 直接导入**真实实现** sidebarCount，不复刻副本。
+// 首版测试里 countOf 是组件内局部函数，测试文件复刻了一份 —— 变异真实代码后
+// 测试仍全绿，等于什么都没锁。纯函数必须抽到 format.ts 才能被有效覆盖。
+const { sidebarCount } = fmt;
+
+
+
+check("台数渲染：counts 里没有该文件夹 key 时必须显示 0，不得穿透到 fallback 🩸", () => {
+  // 用户截图：删掉「1111」里最后一台 IP 后，侧边栏仍显示 1。
+  // 根因：写成 `counts?.get(id) ?? fallback.get(id) ?? 0`，
+  // 空文件夹的 key 不在 Map 里 -> get 返回 undefined -> ?? 穿透 ->
+  // 显示 listFolders 的旧值。`??` 把「真实为 0」和「未提供」混为一谈。
+  const counts = new Map([[0, 3]]);            // 临时区 3 台，无 1111
+  const fallback = new Map([[0, 3], [1, 1]]); // listFolders 旧值：1111=1
+  /* 真实实现，非复刻 */
+  eq(sidebarCount(counts, fallback, 0), 3, "临时区 3");
+  eq(sidebarCount(counts, fallback, 1), 0, "🩸 1111 已空 -> 必须显示 0，不得显示 fallback 的 1");
+});
+
+check("台数渲染：counts 未提供时才走 fallback", () => {
+  const fallback = new Map([[0, 3], [1, 1]]);
+  
+  eq(sidebarCount(undefined, fallback, 1), 1, "未提供 counts 时用 fallback（降级行为不变）");
+  eq(sidebarCount(undefined, fallback, 0), 3);
+});
+
+check("台数渲染：counts 与 fallback 不一致时以 counts 为准 🩸", () => {
+  // 台数只应有一个权威来源。两边不一致时用 counts（实时的），
+  // 绝不能因为 fallback 有值就优先用它。
+  const counts = new Map([[1, 0]]);
+  const fallback = new Map([[1, 7]]);
+  /* 真实实现，非复刻 */
+  eq(sidebarCount(counts, fallback, 1), 0, "实时值 0 必须胜出");
+});
+
+check("台数同步：删掉文件夹内最后一台 -> 该文件夹归零，其余不变", () => {
+  // 完整场景：1111 有 1 台（111.1 = id 2），删掉后
+  const before = folderCounts([{ folder_id: null }, { folder_id: 1 }], new Set([1, 2]));
+  eq(before.get(0), 1, "临时区 1");
+  eq(before.get(1), 1, "1111 有 1 台");
+  const after = folderCounts([{ folder_id: null }], new Set([1, 2]));
+  eq(after.get(0), 1, "临时区不受影响");
+  eq(after.get(1) ?? 0, 0, "🩸 1111 归零");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

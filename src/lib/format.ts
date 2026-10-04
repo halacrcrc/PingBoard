@@ -354,3 +354,26 @@ export function folderCounts(
   }
   return m;
 }
+/**
+ * 侧边栏某个文件夹该显示多少台。
+ *
+ * 🩸 `counts` 一旦提供就**完全信任**它 —— Map 里没有该 key 即代表「0 台」，
+ * 必须显示 0。
+ *
+ * 此前写成 `counts?.get(id) ?? fallback.get(id) ?? 0` 是错的：空文件夹的 key
+ * 不在 Map 里，`counts.get(id)` 返回 `undefined`，`??` 会**穿透**到 fallback，
+ * 把 `listFolders` 的旧值显示出来 —— 现象是「删掉文件夹内最后一台 IP 后
+ * 计数仍停在 1」（fallback 只在增删文件夹时刷新）。`??` 把「真实为 0」与
+ * 「未提供 counts」混为一谈。
+ *
+ * @param counts 实时台数（来自快照）；`undefined` = 未提供，走降级
+ * @param fallback `listFolders` 自带的 count（可能滞后，但绝不为 0）
+ */
+export function sidebarCount(
+  counts: ReadonlyMap<number, number> | undefined,
+  fallback: ReadonlyMap<number, number>,
+  id: number
+): number {
+  if (counts !== undefined) return counts.get(id) ?? 0;
+  return fallback.get(id) ?? 0;
+}
