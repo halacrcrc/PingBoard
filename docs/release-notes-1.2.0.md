@@ -1,4 +1,4 @@
-# v1.2 发布说明 —— 主机文件夹 + 统计持久化
+# v1.2.0 发布说明 —— 主机文件夹 + 统计持久化
 
 > 对比基准：v1.1.9（tag `v1.1.9`）
 > 完整设计见 [`folder-design.md`](folder-design.md)；导出筛选见 [`export-filter-design.md`](export-filter-design.md)
@@ -124,9 +124,9 @@ v1.1.10 一次性解决这两件事，外加三处修正。
 
 | 文件 | 大小 | 说明 |
 |---|---|---|
-| `PingBoard_1.2_x64-setup.exe` | ≈ 2.1 MB | **在线引导**（默认），安装时联网下载引导程序 |
-| `PingBoard_1.2_x64-setup-embedWebView2.exe` | ≈ 3.9 MB | **内置引导**，网络不稳时用 |
-| `PingBoard_1.2_arm64-setup.exe` | ≈ 1.9 MB | **ARM64 实验包**，未经真机测试 |
+| `PingBoard_1.2.0_x64-setup.exe` | ≈ 2.1 MB | **在线引导**（默认），安装时联网下载引导程序 |
+| `PingBoard_1.2.0_x64-setup-embedWebView2.exe` | ≈ 3.9 MB | **内置引导**，网络不稳时用 |
+| `PingBoard_1.2.0_arm64-setup.exe` | ≈ 1.9 MB | **ARM64 实验包**，未经真机测试 |
 
 ---
 
