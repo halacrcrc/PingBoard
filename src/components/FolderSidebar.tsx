@@ -22,6 +22,9 @@ export interface FolderSidebarProps {
   /** 清空勾选 = 回到「显示全部节点」。**不是**逐个 toggle —— toggle 会把
    *  当前没勾的文件夹也勾上（scope={A} 时清空会得到 {临时区} 而非 {}）。*/
   onClearAll: () => void;
+  /** 勾选全部（临时区 + 所有文件夹）—— 新语义下「不勾=不显示」，
+   *  用户需要一个快捷方式一次性回到「看全部」 */
+  onSelectAll: () => void;
   onCreate: (name: string, color: string) => void;
   onRename: (id: number, name: string, color: string) => void;
   onDelete: (id: number) => void;
@@ -61,6 +64,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   scope,
   onToggle,
   onClearAll,
+  onSelectAll,
   onCreate,
   onRename,
   onDelete,
@@ -90,19 +94,34 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   // 之前它作为组件内局部函数，测试文件里的复刻副本测不到真实代码）。
   const countOf = (id: number) => sidebarCount(counts, fallbackCounts, id);
   const total = folders.reduce((a, f) => a + countOf(f.folder.id), 0);
+  // 语义变更（用户定稿）：不再有「不勾 = 全部」。
+  // 空集 = 什么都不显示；allChecked 改为判断「是否已全部勾上」（供「全选」按钮禁用）
   const allChecked = scope.size === 0;
+  const allSelected = folders.length > 0 && scope.size >= folders.length;
   return (
     <div className="w-48 max-[1199px]:w-36 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
       <div className="px-2.5 h-9 flex items-center justify-between border-b border-slate-200 dark:border-slate-700 shrink-0">
         <span className="text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">范围</span>
-        <button
-          className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 whitespace-nowrap disabled:opacity-40"
-          disabled={allChecked || disabled}
-          title="清空勾选 = 显示全部节点"
-          onClick={onClearAll}
-        >
-          {allChecked ? "全部（未筛选）" : "取消勾选"}
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* 语义变更：不再有「不勾=全部」。空集 = 什么都不显示，
+              故这里提供「全选」把范围一次性铺满，方便用户快速回到看全部 */}
+          <button
+            className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 whitespace-nowrap disabled:opacity-40"
+            disabled={disabled || folders.length === 0 || allSelected}
+            title="勾选全部文件夹与临时区"
+            onClick={onSelectAll}
+          >
+            全选
+          </button>
+          <button
+            className="text-[11px] text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 whitespace-nowrap disabled:opacity-40"
+            disabled={disabled || scope.size === 0}
+            title="取消全部勾选（主表将不显示任何主机）"
+            onClick={onClearAll}
+          >
+            清空
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
@@ -164,7 +183,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
           + 新建文件夹
         </button>
         <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-          共 {total} 台 · 不勾=全部
+          {scope.size === 0 ? "未选范围 · 勾选后显示" : `已选 ${total} 台`}
         </div>
       </div>
       {/* 新建 / 重命名 */}

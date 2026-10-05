@@ -724,6 +724,7 @@ const App: React.FC = () => {
         disabled={false}
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}
         onClearAll={() => setFolderScope(new Set())}
+        onSelectAll={() => setFolderScope(new Set(folders.map((f) => f.folder.id)))}
         onCreate={(name, color) => {
           api
             .createFolder(name, color)
@@ -750,6 +751,9 @@ const App: React.FC = () => {
         }}
       />
         <div className="flex-1 min-w-0 border-r border-slate-200 dark:border-slate-700">
+          {/* 三态：① 真的没主机 -> 欢迎页；② 未选范围 -> 引导勾选；
+              ③ 正常 -> 主表。若不做 ②，新语义下「都不勾」会显示成
+              「没有可监控的目标」，让人以为数据没了。 */}
           {snapshot.targets.length === 0 ? (
             <div className="h-full flex items-center justify-center px-6">
               <div className="max-w-[560px] text-center">
@@ -783,6 +787,19 @@ const App: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          ) : folderScope.size === 0 ? (
+            <div className="h-full flex items-center justify-center px-6">
+              <div className="max-w-[420px] text-center">
+                <div className="text-3xl mb-3">📂</div>
+                <div className="text-[14px] font-medium text-slate-700 dark:text-slate-200 mb-1.5">
+                  未选择任何范围
+                </div>
+                <p className="text-[12.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  请在左侧勾选「临时区」或文件夹以查看其中的主机；
+                  当前共有 {snapshot.targets.length} 台主机未显示。
+                </p>
               </div>
             </div>
           ) : (

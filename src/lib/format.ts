@@ -254,7 +254,11 @@ export function exportFilterHint(f: ExportFilter): string {
  * 纯函数，便于单测锁住「不勾 = 全部」这条反直觉但已定稿的口径。
  */
 export function inFolderScope(t: TargetState, scope: ReadonlySet<number>): boolean {
-  if (scope.size === 0) return true;
+  // 🩸 语义变更（用户定稿 2026-10-06）：**空集 = 不显示任何主机**。
+  // 原为 `if (scope.size === 0) return true`（一个都不勾 = 全部），
+  // 与「勾选状态」视觉矛盾 —— 全都不勾却显示全部。现改为严格一致：
+  // 勾了什么就显示什么，一个都不勾就什么都不显示（初始即空白）。
+  if (scope.size === 0) return false;
   return scope.has(t.folder_id ?? 0);
 }
 
@@ -263,7 +267,7 @@ export function filterByFolderScope(
   targets: TargetState[],
   scope: ReadonlySet<number>
 ): TargetState[] {
-  if (scope.size === 0) return targets;
+  // 空集 = 空范围（不再是全部），见 inFolderScope 的说明
   return targets.filter((t) => inFolderScope(t, scope));
 }
 
@@ -306,8 +310,11 @@ export function tempAreaCount(targets: ReadonlyArray<{ folder_id: number | null 
 export function exportScopeIds(
   targets: ReadonlyArray<{ id: number; folder_id: number | null }>,
   scope: ReadonlySet<number>
-): number[] | null {
-  if (scope.size === 0) return null;
+): number[] {
+  // 🩸 空集 = 空范围（导出 0 台），不再是「全部」。
+  // 与侧边栏「都不勾 = 都不显示」同口径（用户定稿 2026-10-06）。
+  // ⚠️ 不再返回 null：后端 `export_targets(Some([]))` 会正确产出 0 行，
+  // 而 null 的语义是「导出全部」，两者绝不可混。
   const s = scope as ReadonlySet<number>;
   return targets.filter((t) => s.has(t.folder_id ?? 0)).map((t) => t.id);
 }

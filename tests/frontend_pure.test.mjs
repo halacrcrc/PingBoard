@@ -1016,9 +1016,14 @@ const mkT = (id, folderId) => ({
 
 const TS = [mkT(1, null), mkT(2, null), mkT(3, 1), mkT(4, 2)];
 
-check("文件夹范围：一个都不勾 = 全部（反直觉但已定稿的口径）", () => {
-  eq(TS.filter((t) => inFolderScope(t, new Set())).length, 4, "空集合必须命中全部");
-  eq(filterByFolderScope(TS, new Set()), TS, "空集合过滤应原样返回");
+check("文件夹范围：一个都不勾 = 都不显示（用户定稿 2026-10-06）", () => {
+  // 语义变更：原「不勾=全部」已废弃，改为严格与勾选状态一致。
+  // TS = [mkT(1,null), mkT(2,null), mkT(3,1), mkT(4,2)]
+  eq(filterByFolderScope(TS, new Set()).length, 0, "🩸 都不勾 -> 都不显示");
+  eq(filterByFolderScope(TS, new Set([1])).map((t) => t.id), [3], "勾选文件夹1");
+  eq(filterByFolderScope(TS, new Set([2])).map((t) => t.id), [4], "勾选文件夹2");
+  eq(filterByFolderScope(TS, new Set([0])).map((t) => t.id), [1, 2], "勾选临时区");
+  eq(filterByFolderScope(TS, new Set([0, 1, 2])).length, 4, "全勾 = 全部");
 });
 
 check("文件夹范围：folder_id 为 null 归入 id 0（临时区）", () => {
@@ -1104,10 +1109,15 @@ const scopeSample = () => [
   { id: 3, folder_id: 2 }, { id: 4, folder_id: null },
 ];
 
-check("C2 导出范围：侧边栏未勾选任何文件夹时返回 null（= 全部）🩸", () => {
-  // null 在后端语义是「导出全部」。若这里返回全部 id 数组，v1.1.9 的
-  // 「未勾选 -> 导出全部」路径就会产生额外差异，破坏兼容性。
-  eq(exportScopeIds(scopeSample(), new Set()), null, "范围为空必须返回 null");
+check("C2 导出范围：未勾选任何文件夹时导出 0 台 🩸", () => {
+  // 语义随侧边栏变更：不勾 = 空范围（不再是全部）。
+  // ⚠️ 返回 [] 而非 null —— 后端 export_targets(Some([])) 产出 0 行，
+  // 而 null 的语义是「导出全部」，绝不可混。
+  eq(exportScopeIds(scopeSample(), new Set()), [], "🩸 不勾 -> 导出 0 台（不得是 null）");
+});
+
+check("C2 导出范围：全勾 = 导出全部（「全选」后）", () => {
+  eq(exportScopeIds(scopeSample(), new Set([0, 1, 2])).length, 4, "全勾 -> 全部 4 台");
 });
 
 check("C2 导出范围：勾选某文件夹后只导出该文件夹的主机", () => {
@@ -1133,8 +1143,8 @@ check("C2 导出范围：勾选的文件夹为空（无主机）时返回空数�
   eq(exportScopeIds(scopeSample(), new Set([99])), []);
 });
 
-check("C2 导出范围：空目标列表 + 空范围 = null（仍是全部，不报错）", () => {
-  eq(exportScopeIds([], new Set()), null);
+check("C2 导出范围：空目标列表 + 空范围 = 空数组（不报错）", () => {
+  eq(exportScopeIds([], new Set()), [], "不得返回 null（null = 导出全部）");
 });
 
 check("C2 导出范围：结果不含范围外的任何主机 🩸", () => {
@@ -1152,9 +1162,25 @@ check("C2 导出范围：结果不含范围外的任何主机 🩸", () => {
 
 
 
-check("侧边栏：scope 为空 = 一个都不勾 = 显示全部节点", () => {
+check("侧边栏：scope 为空 = 都不显示（用户定稿 2026-10-06）🩸", () => {
+  // 语义变更：原为「一个都不勾 = 全部」，与勾选状态视觉矛盾
+  // （全都不勾却显示全部）。现改为严格一致：都不勾 -> 都不显示。
   const ts = [{ id: 1, folder_id: 1 }, { id: 2, folder_id: null }];
-  eq(ts.filter((t) => inFolderScope(t, new Set())).length, 2, "空 scope 必须放行全部");
+  eq(ts.filter((t) => inFolderScope(t, new Set())).length, 0, "🩸 空 scope 必须一台都不显示");
+  eq(filterByFolderScope(ts, new Set()).length, 0);
+});
+
+check("侧边栏：勾了什么就显示什么", () => {
+  const ts = [{ id: 1, folder_id: 1 }, { id: 2, folder_id: null }, { id: 3, folder_id: 2 }];
+  eq(filterByFolderScope(ts, new Set([1])).map((t) => t.id), [1]);
+  eq(filterByFolderScope(ts, new Set([0])).map((t) => t.id), [2], "临时区");
+  eq(filterByFolderScope(ts, new Set([0, 1, 2])).map((t) => t.id), [1, 2, 3], "全勾 = 全部");
+});
+
+check("侧边栏：全勾所有项 = 看到全部主机（「全选」按钮的语义）", () => {
+  // 新语义下没有「不勾=全部」的捷径，但「全选」应等价于看到全部。
+  const ts = [{ id: 1, folder_id: 1 }, { id: 2, folder_id: null }];
+  eq(filterByFolderScope(ts, new Set([0, 1])).length, 2);
 });
 
 check("侧边栏：勾选一个文件夹时，勾选框只应如实反映 scope 🩸", () => {
