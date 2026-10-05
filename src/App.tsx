@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { exportScopeIds, filterByFolderScope, folderCounts, tempAreaCount, tempAreaIds, toggleScope, withLiveCounts } from "./lib/format";
+import { exportScopeIds, filterByFolderScope, folderCounts, mergeSelection, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -630,25 +630,29 @@ const App: React.FC = () => {
   /* ------------------------- 复选框选择 / 选中项启停 / 清空列表 ------------------------- */
 
   // 切换单行勾选（与行选中共用 selected 集合）；勾选时同步主选中项
+  // 🩸 用**函数式更新**：prev 是 React 保证的最新已提交状态，不受
+  // 「快照每 500ms 推送 / 表头全选 / 搜索过滤」引发的重渲染时序影响。
+  // 旧写法 `new Set(selected)` 读的是当前渲染快照，一旦与其它 setSelected
+  // 交错就会基于过期状态计算 —— 表现为「勾选一个把之前的选中弄丢」。
   const handleToggleSelect = (id: number) => {
-    const next = new Set(selected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-      setPrimaryId(id);
-    }
-    setSelected(next);
+    const wasSelected = selected.has(id);
+    setSelected((prev) => toggleSelection(prev, id));
+    if (!wasSelected) setPrimaryId(id);
   };
 
   // 表头全选 / 全不选：仅作用当前过滤后可见的列表
+  // 🩸 全选是**并入**可见行，不是替换整个集合 —— 替换会静默取消
+  // 筛选范围外已选中的主机（用户报告的「再选一个会取消之前的选中」）。
   const handleToggleSelectAll = (selectAll: boolean) => {
     if (selectAll) {
       const ids = filtered.map((t) => t.id);
-      setSelected(new Set(ids));
-      if (ids.length > 0) setPrimaryId(ids[0]);
+      if (ids.length > 0) {
+        setSelected((prev) => mergeSelection(prev, ids, (firstNew) => setPrimaryId(firstNew)));
+      }
     } else {
-      setSelected(new Set());
+      // 全不选同样只清可见的，保留范围外的选中
+      const visible = new Set(filtered.map((t) => t.id));
+      setSelected((prev) => new Set([...prev].filter((id) => !visible.has(id))));
     }
   };
 

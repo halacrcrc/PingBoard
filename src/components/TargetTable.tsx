@@ -9,6 +9,7 @@ import {
   statusBadgeClass,
   statusLabel,
   statusRowClass,
+  visibleSelectedCount,
 } from "../lib/format";
 import Sparkline from "./Sparkline";
 
@@ -121,8 +122,13 @@ const TargetTable: React.FC<TargetTableProps> = ({
   }, [targets, sortKey, sortDir]);
 
   // 全选状态只针对当前传入的 targets（即搜索过滤后可见的列表）
-  const allSelected = targets.length > 0 && selected.size === targets.length;
-  const indeterminate = selected.size > 0 && selected.size < targets.length;
+  // 🩸 必须按**可见行**统计，不能用 `selected.size === targets.length`：
+  // selected 是全局集合（含筛选范围外的主机），targets 是筛选后的列表，
+  // 筛选状态下两者不可比 —— 会让表头复选框的全选/半选状态显示错误，
+  // 进而让「点表头全选」清掉范围外已选中的主机。
+  const visibleSel = visibleSelectedCount(targets, selected);
+  const allSelected = targets.length > 0 && visibleSel === targets.length;
+  const indeterminate = visibleSel > 0 && visibleSel < targets.length;
 
   React.useEffect(() => {
     if (headCheckRef.current) {

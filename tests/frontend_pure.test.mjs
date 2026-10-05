@@ -1436,6 +1436,76 @@ check("源头覆盖：folders 为空（未加载）时返回空数组降级", ()
   const live = withLiveCounts([], new Map());
   eq(live.length, 0, "未加载时返回空数组");
 });
+/* ---------- 主表复选框：选中集合不得被意外清空（用户报告 bug） ---------- */
+
+const { toggleSelection, visibleSelectedCount, mergeSelection } = fmt;
+
+check("选中：逐个勾选必须累积，不得丢失之前的 🩸", () => {
+  // 用户报告：「选中多个之后，再选一个，有可能会取消之前的选中」。
+  // 正确做法是函数式更新 setSelected(prev => toggleSelection(prev, id))，
+  // prev 由 React 保证是最新已提交状态。
+  let sel = new Set();
+  for (const id of [1, 2, 3, 4]) sel = toggleSelection(sel, id);
+  eq([...sel].sort((a, b) => a - b), [1, 2, 3, 4], "四个都应保留");
+});
+
+check("选中：toggleSelection 不修改入参 🩸", () => {
+  // 若直接 mutate 入参，React 的 prev 引用被改坏，
+  // 后续任何基于 prev 的计算都会读到被污染的集合。
+  const src = new Set([1, 2]);
+  const next = toggleSelection(src, 3);
+  if(src.has(3)) throw new Error("入参被污染了");
+  if(next === src) throw new Error("必须返回新集合");
+  eq([...src], [1, 2], "入参保持不变");
+  eq([...next].sort((a, b) => a - b), [1, 2, 3]);
+});
+
+check("选中：再次点击同一行是取消 🩸", () => {
+  let sel = new Set();
+  sel = toggleSelection(sel, 1);
+  sel = toggleSelection(sel, 2);
+  sel = toggleSelection(sel, 1);
+  eq([...sel], [2], "再次点击应只取消该行，其余保留");
+});
+
+check("表头全选：并入可见行，不得清掉范围外的已选 🩸", () => {
+  // 用户场景：「全部」下选了 3 台 -> 筛到只有 1 台的文件夹 -> 点表头全选
+  // 旧实现 setSelected(new Set(ids)) 会把范围外的 2 台静默取消。
+  const selected = new Set([1, 2, 3]);
+  const visible = [1];                       // 筛选后只有 id=1
+  let called = null;
+  const next = mergeSelection(selected, visible, (id) => { called = id; });
+  eq([...next].sort((a, b) => a - b), [1, 2, 3], "🩸 范围外的 2、3 必须保留");
+  eq(called, null, "没有新增项（1 已选）时不应切主选");
+});
+
+check("表头全选：有新增项时回调首个新增项", () => {
+  const selected = new Set([1]);
+  let called = null;
+  const next = mergeSelection(selected, [1, 7, 8], (id) => { called = id; });
+  eq([...next].sort((a, b) => a - b), [1, 7, 8]);
+  eq(called, 7, "回调应收到首个新增项 7");
+});
+
+check("表头状态：全选判断只看可见行，不得受范围外选中干扰 🩸", () => {
+  // selected 含筛选范围外的主机 -> 用 selected.size === targets.length
+  // 判断会错。必须按可见行统计。
+  const targets = [{ id: 1 }, { id: 2 }];     // 筛选后可见 2 台
+  const selected = new Set([1, 2, 3, 4, 5]); // 含 3 台范围外的
+  eq(visibleSelectedCount(targets, selected), 2, "可见中已选 2 台");
+  // 旧写法会得到 5 === 2 -> false（碰巧对），但 selected={1,3,4,5} 时
+  // 会得到 4 === 2 -> false 而实际可见只选了 1 台 -> 状态显示错误
+  eq(visibleSelectedCount(targets, new Set([1, 3, 4, 5])), 1, "可见中只选 1 台");
+  eq(visibleSelectedCount(targets, new Set()), 0, "半选/全不选");
+  eq(visibleSelectedCount([], new Set([1])), 0, "无可见行时为 0");
+});
+
+check("表头状态：可见全选 -> allSelected 为真", () => {
+  const targets = [{ id: 1 }, { id: 2 }];
+  const sel = new Set([1, 2]);
+  const n = visibleSelectedCount(targets, sel);
+  eq(n === targets.length, true, "可见全选");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

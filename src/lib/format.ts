@@ -400,3 +400,77 @@ export function withLiveCounts<
   if (folders.length === 0) return [];
   return folders.map((f) => ({ ...f, count: counts.get(f.folder.id) ?? 0 }));
 }
+/* ===================== 主表复选框选中集合 ===================== */
+
+/**
+ * 切换某行的选中状态（**返回新集合**，不修改入参）。
+ *
+ * 供 `setSelected(prev => toggleSelection(prev, id))` 的函数式更新使用。
+ *
+ * 🩸 不得写成 `new Set(selected)` 直接读组件当前渲染的 selected：
+ * 那是**当前渲染的快照**，一旦与其它 setSelected 交错（快照每 500ms 推送、
+ * 表头全选、搜索过滤都会引发重渲染），新值就会基于过期状态计算，
+ * 表现为「勾选一个就把之前的选中弄丢」。
+ */
+export function toggleSelection(
+  selected: ReadonlySet<number>,
+  id: number
+): Set<number> {
+  const next = new Set(selected);
+  if (!next.delete(id)) next.add(id);
+  return next;
+}
+
+/**
+ * 「当前可见的行」里有多少条已被选中。
+ *
+ * 🩸 不能用 `selected.size === targets.length`：selected 是**全局**集合
+ * （含筛选范围外的主机），targets 是**筛选后**的列表。筛选状态下两者
+ * 不可比 —— 会让表头复选框的「全选 / 半选」状态显示错误。
+ */
+export function visibleSelectedCount(
+  targets: ReadonlyArray<{ id: number }>,
+  selected: ReadonlySet<number>
+): number {
+  let n = 0;
+  for (const t of targets) if (selected.has(t.id)) n++;
+  return n;
+}
+
+/**
+ * 表头「全选」：**并入**可见行，而不是替换整个集合。
+ *
+ * 🩸 替换（`new Set(ids)`）会清掉筛选范围外已选中的主机 ——
+ * 用户在「全部」下选了 3 台，筛到某个只有 1 台的文件夹后点表头全选，
+ * 之前那 2 台就被静默取消了。
+ *
+ * @param onNewlySelected 新增选中时的回调（用于把主选切到第一个新增项）
+ */
+export function mergeSelection(
+  selected: ReadonlySet<number>,
+  ids: ReadonlyArray<number>,
+  onNewlySelected: (firstNewId: number) => void
+): Set<number> {
+  const next = new Set(selected);
+  let firstNew: number | null = null;
+  for (const id of ids) {
+    if (!next.has(id)) {
+      next.add(id);
+      if (firstNew === null) firstNew = id;
+    }
+  }
+  if (firstNew !== null) onNewlySelected(firstNew);
+  return next;
+}
+
+/**
+ * 表头「全不选」：只清可见的，保留筛选范围外的已选。
+ * 与 `mergeSelection` 对称 —— 否则「全不选」也会静默清掉范围外的选中。
+ */
+export function removeSelection(
+  selected: ReadonlySet<number>,
+  ids: ReadonlyArray<number>
+): Set<number> {
+  const drop = new Set(ids);
+  return new Set([...selected].filter((id) => !drop.has(id)));
+}
