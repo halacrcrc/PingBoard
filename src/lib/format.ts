@@ -377,3 +377,26 @@ export function sidebarCount(
   if (counts !== undefined) return counts.get(id) ?? 0;
   return fallback.get(id) ?? 0;
 }
+/**
+ * 把 `folders[].count`（后端 `list_folders` 算的，**只在增删文件夹时刷新**）
+ * 统一覆盖为实时台数。
+ *
+ * 🩸 为什么必须在**数据源头**做：`FolderEntry.count` 是个滞后的派生值，
+ * 任何消费点直接读 `f.count` 都会显示旧值。此前只在侧边栏绕开它
+ * （改用 `sidebarCount`），结果添加主机的「归入」下拉仍渲染 `f.count` ——
+ * 侧边栏全 0、下拉却显示「临时区（3）」。逐个给消费方传 props 治标，
+ * 源头覆盖才能让**新增**的消费点不再踩同一个坑。
+ *
+ * 降级判据是 **`folders.length === 0`** 而非 `counts.size === 0` ——
+ * 后端 `list_folders` 恒会插入一个 id=0 的「临时区」项，故 `folders` 为空
+ * 只可能意味着「列表尚未加载」。而 `counts` 为空 Map 有两种含义：
+ * 未加载，或**用户把主机全删光了**（`targets` 为空）。若用 `counts.size`
+ * 判降级，后一种情况会走降级分支把所有文件夹恢复成后端旧值 ——
+ * 现象正是「侧边栏显示 0、下拉却显示『临时区（3）』」。
+ */
+export function withLiveCounts<
+  F extends { folder: { id: number }; count: number }
+>(folders: ReadonlyArray<F>, counts: ReadonlyMap<number, number>): F[] {
+  if (folders.length === 0) return [];
+  return folders.map((f) => ({ ...f, count: counts.get(f.folder.id) ?? 0 }));
+}

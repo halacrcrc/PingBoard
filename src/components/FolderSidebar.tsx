@@ -12,8 +12,9 @@ import ConfirmDialog from "./ConfirmDialog";
 export interface FolderSidebarProps {
   folders: FolderEntry[];
   /** 各文件夹实时台数（key 0 = 临时区），由 `folderCounts(snapshot.targets)` 得出。
-   *  🩸 刻意**不用** `folders[].count`：那份数据只在显式 refreshFolders() 时刷新，
-   *  漏一个调用点就会出现「清空列表后台数不变」的脏数据。 */
+   *  🩸 `folders[].count` 已在 App.tsq 的 `liveFolders` 里被统一覆盖为实时值
+   *  （源头治理，避免每个消费点各自踩「后端 count 滞后」的坑）；此 prop 是
+   *  第二道保险，且 `sidebarCount` 的语义是「counts 一旦提供就完全信任」。 */
   counts?: Map<number, number>;
   /** 当前勾选的文件夹 id 集合；空 = 全部 */
   scope: ReadonlySet<number>;

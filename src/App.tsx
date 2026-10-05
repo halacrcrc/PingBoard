@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { exportScopeIds, filterByFolderScope, folderCounts, tempAreaCount, tempAreaIds, toggleScope } from "./lib/format";
+import { exportScopeIds, filterByFolderScope, folderCounts, tempAreaCount, tempAreaIds, toggleScope, withLiveCounts } from "./lib/format";
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -571,6 +571,21 @@ const App: React.FC = () => {
     [snapshot.targets, realFolderIds]
   );
 
+  // liveFolders：把 `folders[].count` 统一覆盖为**实时**台数后再下发。
+  //
+  // 🩸 为什么不逐个给消费方传 counts prop：`FolderEntry.count` 来自后端
+  // `list_folders`，而它只在**增删文件夹**时刷新，因此是滞后的派生值。
+  // 此前只在侧边栏绕开它（改用 countOf），结果添加主机的「归入」下拉
+  // 仍在渲染 `f.count` —— 侧边栏全 0、下拉却显示「临时区（3）」。
+  // 在数据源头统一覆盖，新增消费点就不会再踩同一个坑。
+  //
+  // 降级：`folderCountsMap` 仍是空 Map（列表尚未加载）时原样返回，
+  // 保留后端 count 兜底，避免启动瞬间台数全变 0。
+  const liveFolders = React.useMemo(
+    () => withLiveCounts(folders, folderCountsMap),
+    [folders, folderCountsMap]
+  );
+
   const scopedTargets = React.useMemo(
     () => filterByFolderScope(snapshot.targets, folderScope),
     [snapshot.targets, folderScope]
@@ -694,7 +709,7 @@ const App: React.FC = () => {
 
       <div className="flex-1 flex min-h-0">
       <FolderSidebar
-        folders={folders}
+        folders={liveFolders}
         counts={folderCountsMap}
         scope={folderScope}
         disabled={false}
@@ -808,7 +823,7 @@ const App: React.FC = () => {
         open={showAdd}
         running={snapshot.running}
         existingHosts={existingHosts}
-        folders={folders}
+        folders={liveFolders}
         onClose={() => setShowAdd(false)}
         onAdded={(ids) => {
           // 新增主机可能进了文件夹，侧边栏台数需重取

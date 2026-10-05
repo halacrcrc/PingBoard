@@ -1371,6 +1371,71 @@ check("台数同步：删掉文件夹内最后一台 -> 该文件夹归零，其
   eq(after.get(0), 1, "临时区不受影响");
   eq(after.get(1) ?? 0, 0, "🩸 1111 归零");
 });
+/* ---------- 源头覆盖 folders[].count（用户截图：下拉显示旧台数） ---------- */
+
+const { withLiveCounts } = fmt;
+
+/** 造 3 个文件夹（临时区 + 两个），count 为后端 list_folders 的滞后值 */
+const foldersSample = () => ([
+  { folder: { id: 0, name: "临时区" }, count: 3 },
+  { folder: { id: 1, name: "1111" }, count: 1 },
+  { folder: { id: 2, name: "CF" }, count: 2 },
+]);
+
+check("源头覆盖：所有文件夹的 count 都被实时值取代 🩸", () => {
+  // 用户截图：侧边栏全 0、状态栏主机 0，但添加主机的「归入」下拉显示
+  // 「临时区（3）」。根因是该下拉直接渲染 f.count（后端 list_folders 的
+  // 滞后值，只在增删文件夹时刷新），而侧边栏已改用实时统计。
+  const live = withLiveCounts(foldersSample(), new Map([[0, 0]]));
+  eq(live.map((f) => f.count), [0, 0, 0], "全部文件夹都必须是实时值 0");
+});
+
+check("源头覆盖：只剩部分文件夹有实时值时不得混用旧值 🩸", () => {
+  // counts 里没有 1111 / CF 的 key（它们已空）-> 必须显示 0，
+  // 绝不能回落到后端旧值 1 / 2，否则又出现「侧边栏 0、下拉 1」。
+  const live = withLiveCounts(foldersSample(), new Map([[0, 0]]));
+  const byName = Object.fromEntries(live.map((f) => [f.folder.name, f.count]));
+  eq(byName["临时区"], 0);
+  eq(byName["1111"], 0, "🩸 不得显示后端旧值 1");
+  eq(byName["CF"], 0, "🩸 不得显示后端旧值 2");
+});
+
+check("源头覆盖：降级判据是 folders 为空，而非 counts 为空 🩸", () => {
+  // 旧判据 `counts.size === 0` 有 bug：主机全删光时 counts 也是空 Map，
+  // 会误走降级把旧值复活。降级只应在「列表尚未加载」（folders 为空）时发生。
+  const src = foldersSample();
+  const live = withLiveCounts(src, new Map());
+  eq(live.map((f) => f.count), [0, 0, 0], "folders 非空 + counts 空 = 真的空，全部归 0");
+  if(live === src) throw new Error("必须返回新数组，不能把入参直接给下游");
+  // 真正的降级：folders 为空
+  eq(withLiveCounts([], new Map()).length, 0);
+});
+
+check("源头覆盖：不影响 name / id 等其他字段", () => {
+  const live = withLiveCounts(foldersSample(), new Map([[0, 0]]));
+  eq(live[0].folder.name, "临时区");
+  eq(live[2].folder.id, 2);
+  eq(live.length, 3, "不得增删文件夹");
+});
+
+check("源头覆盖：主机全删光后每行都显示 0 🩸", () => {
+  // 端到端复现用户截图：主机 0 台，folders 仍存在（后端返回 4 项），
+  // folderCounts 返回**空 Map**。
+  //
+  // 🩸 这正是首版实现的 bug：用 `counts.size === 0` 判「未加载」而走降级，
+  // 于是主机全删光时反而恢复成后端旧值 —— 侧边栏 0、下拉「临时区（3）」。
+  // 正确判据是 folders.length===0（后端恒插入 id=0 临时区项，故为空 ⟺ 未加载）。
+  const counts = folderCounts([], new Set([0, 1, 2]));
+  eq(counts.size, 0, "前提：主机全删光 -> counts 是空 Map");
+  const live = withLiveCounts(foldersSample(), counts);
+  eq(live.map((f) => f.count), [0, 0, 0], "🩸 每行都必须是 0，不得复活旧值");
+});
+
+check("源头覆盖：folders 为空（未加载）时返回空数组降级", () => {
+  // 启动未加载：后端还没返回，下游没有行可渲染，返回 [] 即降级。
+  const live = withLiveCounts([], new Map());
+  eq(live.length, 0, "未加载时返回空数组");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {
