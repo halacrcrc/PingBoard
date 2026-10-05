@@ -1506,6 +1506,64 @@ check("表头状态：可见全选 -> allSelected 为真", () => {
   const n = visibleSelectedCount(targets, sel);
   eq(n === targets.length, true, "可见全选");
 });
+/* ---------- Shift 连续选择（v1.2.0 新功能） ---------- */
+
+const { rangeIds } = fmt;
+
+check("Shift 区间：按可见顺序取锚点到目标（含两端）", () => {
+  const ordered = [10, 20, 30, 40, 50];
+  eq(rangeIds(ordered, 20, 40), [20, 30, 40]);
+  eq(rangeIds(ordered, 40, 20), [20, 30, 40], "反向点击必须等价");
+  eq(rangeIds(ordered, 10, 50), [10, 20, 30, 40, 50]);
+  eq(rangeIds(ordered, 30, 30), [30], "点自己 -> 只选它");
+});
+
+check("Shift 区间：必须按屏幕顺序，而非原始 id 顺序 🩸", () => {
+  // 表格按主机名排序后，id 顺序可能是乱的。若按原始顺序取区间，
+  // 选中的会是完全不相干的一批主机 —— 这正是此前 handleRowClick 的 bug。
+  const onScreen = [7, 3, 9, 1, 5];   // 排序后的显示顺序
+  eq(rangeIds(onScreen, 7, 5), [7, 3, 9, 1, 5], "整段");
+  eq(rangeIds(onScreen, 3, 1), [3, 9, 1], "中间段，按屏幕顺序");
+});
+
+check("Shift 区间：锚点不在可见列表时退化为单选", () => {
+  // 用户在「全部」下点了锚点，然后搜索/侧边栏筛选把该行筛掉了。
+  const ordered = [10, 20, 30];
+  eq(rangeIds(ordered, 999, 30), [30], "锚点不可见 -> 只选目标行");
+});
+
+check("Shift 区间：目标不在可见列表时退化为单选", () => {
+  eq(rangeIds([10, 20], 10, 777), [777]);
+  eq(rangeIds([], 1, 1), [1], "空列表 -> 单选");
+});
+
+check("Shift 区间：无锚点（null）时退化为单选", () => {
+  // 用户刚打开、还没点过任何行就按 Shift
+  eq(rangeIds([10, 20, 30], null, 20), [20]);
+});
+
+check("Shift 区间：不得包含区间外的主机 🩸", () => {
+  const ordered = [1, 2, 3, 4, 5, 6];
+  const picked = rangeIds(ordered, 2, 4);
+  for (const outside of [1, 6]) {
+    if (picked.includes(outside)) throw new Error(`区间外的 ${outside} 被选中了`);
+  }
+  eq(picked, [2, 3, 4]);
+});
+
+check("Shift 区间：结果是新数组，不得改动入参", () => {
+  const ordered = [10, 20, 30];
+  const r = rangeIds(ordered, 10, 30);
+  if (r === ordered) throw new Error("必须返回新数组");
+  eq(ordered, [10, 20, 30], "入参保持不变");
+});
+
+check("Shift 区间 + 并入：不得清掉区间外已选中的 🩸", () => {
+  // 与表头全选同口径：Shift 也是「并入」而非「替换」
+  let sel = new Set([99]);          // 区间外已有选中
+  sel = mergeSelection(sel, rangeIds([1, 2, 3, 4], 1, 3), () => undefined);
+  eq([...sel].sort((a, b) => a - b), [1, 2, 3, 99], "99 必须保留");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

@@ -4,6 +4,7 @@ import type { Status, TargetState } from "../types";
 import {
   fmtMs,
   fmtPct,
+  rangeIds,
   fmtTime,
   rttColorClass,
   statusBadgeClass,
@@ -31,12 +32,19 @@ export interface TargetTableProps {
   targets: TargetState[];
   selected: Set<number>;
   primaryId: number | null;
+  /** Shift 连续选择的锚点（上一次非 Shift 点击的行）；`null` = 尚无锚点 */
+  anchorId: number | null;
   sortKey: SortKey;
   sortDir: "asc" | "desc";
   onSort: (key: SortKey) => void;
   onRowClick: (id: number, e: React.MouseEvent) => void;
   /** 勾选/取消勾选单行（与行选中状态共用 selected 集合） */
   onToggleSelect: (id: number) => void;
+  /**
+   * Shift 连续选择：选中「锚点 → 本行」区间。
+   * **ids 由本组件按可见+排序后的顺序算出** —— App 侧拿不到排序结果。
+   */
+  onSelectRange: (ids: number[]) => void;
   /** 表头全选/全不选（仅作用当前传入的 targets） */
   onToggleSelectAll: (selectAll: boolean) => void;
   historyLen: number;
@@ -101,16 +109,20 @@ const TargetTable: React.FC<TargetTableProps> = ({
   targets,
   selected,
   primaryId,
+  anchorId,
   sortKey,
   sortDir,
   onSort,
   onRowClick,
   onToggleSelect,
+  onSelectRange,
   onToggleSelectAll,
   historyLen,
   unreadIds,
 }) => {
   const headCheckRef = React.useRef<HTMLInputElement | null>(null);
+  // 复选框 click 时记录的 shiftKey，供随后的 change 事件使用
+  const shiftRef = React.useRef(false);
 
   const sorted = React.useMemo(() => {
     const arr = [...targets];
@@ -126,6 +138,9 @@ const TargetTable: React.FC<TargetTableProps> = ({
   // selected 是全局集合（含筛选范围外的主机），targets 是筛选后的列表，
   // 筛选状态下两者不可比 —— 会让表头复选框的全选/半选状态显示错误，
   // 进而让「点表头全选」清掉范围外已选中的主机。
+  // Shift 区间必须按**屏幕上的顺序**取，而非 targets 的原始顺序
+  const sortedIds = React.useMemo(() => sorted.map((t) => t.id), [sorted]);
+
   const visibleSel = visibleSelectedCount(targets, selected);
   const allSelected = targets.length > 0 && visibleSel === targets.length;
   const indeterminate = visibleSel > 0 && visibleSel < targets.length;
@@ -182,7 +197,15 @@ const TargetTable: React.FC<TargetTableProps> = ({
             return (
               <tr
                 key={t.id}
-                onClick={(e) => onRowClick(t.id, e)}
+                onClick={(e) => {
+                  // 行点击：Shift 连续选择也必须按**可见+排序后**的顺序取区间，
+                  // 故在这里算好 ids 再交给 App（App 拿不到排序结果）。
+                  if (e.shiftKey) {
+                    onSelectRange(rangeIds(sortedIds, anchorId, t.id));
+                    return;
+                  }
+                  onRowClick(t.id, e);
+                }}
                 className={`pb-table-row border-b border-slate-200 dark:border-slate-700 cursor-pointer ${statusRowClass(
                   t.status
                 )} ${isSel ? "outline outline-1 outline-sky-500 -outline-offset-1" : ""} ${
@@ -193,8 +216,19 @@ const TargetTable: React.FC<TargetTableProps> = ({
                   <input
                     type="checkbox"
                     checked={isSel}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={() => onToggleSelect(t.id)}
+                    // 🩸 复选框的 `change` 事件**不带可靠的 shiftKey**，
+                    // 只能在 `click` 里抓（click 先于 change 触发），存进 ref。
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      shiftRef.current = e.shiftKey;
+                    }}
+                    onChange={() => {
+                      if (shiftRef.current) {
+                        onSelectRange(rangeIds(sortedIds, anchorId, t.id));
+                      } else {
+                        onToggleSelect(t.id);
+                      }
+                    }}
                     className="align-middle cursor-pointer accent-sky-600"
                     title="选择此行"
                   />

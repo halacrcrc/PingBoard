@@ -474,3 +474,29 @@ export function removeSelection(
   const drop = new Set(ids);
   return new Set([...selected].filter((id) => !drop.has(id)));
 }
+/**
+ * Shift 连续选择：算出「从锚点到目标行」之间（含两端）的 id。
+ *
+ * 🩸 `orderedIds` **必须是当前可见且排序后的行 id 顺序**。此前用的是
+ * `snapshot.targets`（全局原始顺序），于是：
+ *   - 按某列排序后，区间按**原始**顺序取，视觉上根本不连续；
+ *   - 搜索/侧边栏筛选后，区间会跨越不可见的主机，把它们也悄悄选上。
+ *
+ * @param orderedIds 当前可见行的 id，按屏幕上的顺序
+ * @param anchor     锚点（上一次非 Shift 点击的行）；`null` 表示无锚点
+ * @param target     本次 Shift 点击的行
+ * @returns 区间内所有 id（含两端）；无锚点或端点不可见时退化为 `[target]`
+ */
+export function rangeIds(
+  orderedIds: ReadonlyArray<number>,
+  anchor: number | null,
+  target: number
+): number[] {
+  const ti = orderedIds.indexOf(target);
+  if (ti < 0) return [target];
+  const ai = anchor === null ? -1 : orderedIds.indexOf(anchor);
+  if (ai < 0) return [target]; // 锚点已不可见（筛选变了）-> 退化为单选
+  const lo = Math.min(ai, ti);
+  const hi = Math.max(ai, ti);
+  return orderedIds.slice(lo, hi + 1);
+}

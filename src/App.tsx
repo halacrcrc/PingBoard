@@ -14,6 +14,7 @@ import {
   type ExportFilter,
 } from "./lib/format";
 import { exportScopeIds, filterByFolderScope, folderCounts, mergeSelection, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
+
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
 import Toolbar from "./components/Toolbar";
@@ -122,6 +123,8 @@ const App: React.FC = () => {
   const [confirmClearLogs, setConfirmClearLogs] = React.useState(false);
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [showExport, setShowExport] = React.useState(false);
+  /** Shift 连续选择的锚点；普通点击刷新，Shift 点击不动 */
+  const [anchorId, setAnchorId] = React.useState<number | null>(null);
   // v1.1.10 文件夹：勾选的文件夹 id；**空集 = 全部**（口径见 docs/folder-design.md 7.1）
   const [folderScope, setFolderScope] = React.useState<Set<number>>(new Set());
   const [folders, setFolders] = React.useState<FolderEntry[]>([]);
@@ -445,19 +448,11 @@ const App: React.FC = () => {
 
   const handleRowClick = (id: number, e: React.MouseEvent) => {
     setPrimaryId(id);
+    if (!e.ctrlKey && !e.metaKey) setAnchorId(id); // 刷新锚点
     setSelected((prevSel) => {
       const nextSel = new Set(prevSel);
-      if (e.shiftKey && primaryId !== null) {
-        const ids = snapshot.targets.map((t) => t.id);
-        const a = ids.indexOf(primaryId);
-        const b = ids.indexOf(id);
-        if (a >= 0 && b >= 0) {
-          const lo = Math.min(a, b);
-          const hi = Math.max(a, b);
-          for (let i = lo; i <= hi; i++) nextSel.add(ids[i]);
-        }
-        return nextSel;
-      }
+      // Shift 分支已上移到 TargetTable（区间必须按可见+排序后的顺序取，
+      // 只有那里知道排序结果）。这里保留 ctrl/meta 与普通点击。
       if (e.ctrlKey || e.metaKey) {
         if (nextSel.has(id)) nextSel.delete(id);
         else nextSel.add(id);
@@ -638,6 +633,16 @@ const App: React.FC = () => {
     const wasSelected = selected.has(id);
     setSelected((prev) => toggleSelection(prev, id));
     if (!wasSelected) setPrimaryId(id);
+    // 普通点击即刷新锚点 —— 下次 Shift 从这里起算
+    setAnchorId(id);
+  };
+
+  // Shift 连续选择：并入区间（**不清掉区间外已选中的**，与表头全选同口径）
+  const handleSelectRange = (ids: number[]) => {
+    if (ids.length === 0) return;
+    setSelected((prev) => mergeSelection(prev, ids, () => undefined));
+    setPrimaryId(ids[ids.length - 1]);
+    // 锚点**保持不变**：这样连续 Shift 点击可自由扩大/缩小区间
   };
 
   // 表头全选 / 全不选：仅作用当前过滤后可见的列表
@@ -790,6 +795,8 @@ const App: React.FC = () => {
               onSort={handleSort}
               onRowClick={handleRowClick}
               onToggleSelect={handleToggleSelect}
+              onSelectRange={handleSelectRange}
+              anchorId={anchorId}
               onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
               unreadIds={unreadIds}
