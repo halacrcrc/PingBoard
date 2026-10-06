@@ -46,10 +46,9 @@ export interface TargetTableProps {
    * **ids 由本组件按可见+排序后的顺序算出** —— App 侧拿不到排序结果。
    */
   onSelectRange: (ids: number[]) => void;
-  /** 开始拖拽一行（ids = 参与移动的主机，供全局显示拖影提示） */
-  onDragStart?: (ids: number[]) => void;
-  /** 拖拽结束（无论是否放下） */
-  onDragEnd?: () => void;
+  /** 按下鼠标左键开始**潜在**拖拽（移动超过阈值才算真正拖动，
+   *  以免与点击行/勾选冲突）。定位点为视觉坐标。 */
+  onDragStart?: (ids: number[], at: { x: number; y: number }) => void;
   /** 右键菜单：移动到文件夹（拖拽的可靠替代通道） */
   onContextMenu?: (ids: number[], pos: { x: number; y: number }) => void;
   /** 表头全选/全不选（仅作用当前传入的 targets） */
@@ -124,7 +123,6 @@ const TargetTable: React.FC<TargetTableProps> = ({
   onToggleSelect,
   onSelectRange,
   onDragStart,
-  onDragEnd,
   onContextMenu,
   onToggleSelectAll,
   historyLen,
@@ -207,19 +205,18 @@ const TargetTable: React.FC<TargetTableProps> = ({
             return (
               <tr
                 key={t.id}
-                // 拖到侧边栏文件夹即可移动归属；拖的是「当前选中集合」
-                draggable
-                onDragStart={(e) => {
-                  const ids = dragMoveIds(t.id, selected);
-                  e.dataTransfer.setData(
-                    "application/x-pingboard-targets",
-                    JSON.stringify(ids)
-                  );
-                  e.dataTransfer.setData("text/plain", String(ids.length));
-                  e.dataTransfer.effectAllowed = "move";
-                  onDragStart?.(ids);
+                // 🩸 刻意**不用** HTML5 draggable/dragstart。
+                // 实测在 Tauri WebView2 + <table> 场景下 dragstart 根本不触发
+                // （无拖影、无放置高亮），而原生 DnD 在表格行上的行为
+                // 跨浏览器/WebView 差异极大。改用鼠标事件自实现，见 App.tsx
+                // 的 rowDrag 状态机 —— 全程可控、可测、跨环境一致。
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return; // 只认左键
+                  onDragStart?.(dragMoveIds(t.id, selected), {
+                    x: e.clientX,
+                    y: e.clientY,
+                  });
                 }}
-                onDragEnd={() => onDragEnd?.()}
                 onContextMenu={(e) => {
                   // 右键 = **拖拽的可靠替代通道**。HTML5 拖放在 WebView2 +
                   // 表格场景下有边界风险（draggable 表格行的原生拖拽行为、

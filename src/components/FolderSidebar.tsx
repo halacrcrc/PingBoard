@@ -27,6 +27,10 @@ export interface FolderSidebarProps {
   onSelectAll: () => void;
   /** 从主表拖拽 IP 放下：`folderId = null` 表示移回临时区 */
   onDropTargets: (ids: number[], folderId: number | null) => void;
+  /** 拖拽过程中鼠标扫过某文件夹（`null` = 离开，用于清除高亮） */
+  onDragEnterFolder?: (id: number | null) => void;
+  /** 当前高亮的文件夹（拖拽落点预览） */
+  hoverId?: number | null;
   onCreate: (name: string, color: string) => void;
   onRename: (id: number, name: string, color: string) => void;
   onDelete: (id: number) => void;
@@ -68,6 +72,8 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   onClearAll,
   onSelectAll,
   onDropTargets,
+  onDragEnterFolder,
+  hoverId,
   onCreate,
   onRename,
   onDelete,
@@ -75,8 +81,6 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
 }) => {
   const [edit, setEdit] = React.useState<EditState | null>(null);
   const [askDelete, setAskDelete] = React.useState<FolderEntry | null>(null);
-  /** 当前被拖悬停的文件夹（用于高亮放置反馈） */
-  const [dropId, setDropId] = React.useState<number | null>(null);
 
   // 每次打开编辑框时初始化草稿（wasOpenRef 模式，避免依赖对象，见 R6）
   const wasOpenRef = React.useRef(false);
@@ -143,39 +147,11 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
           return (
             <div
               key={f.folder.id}
-              // 拖拽放置目标：从主表把 IP 拖到这里即移动归属
-              //
-              // 🩸 **不要在 dragover 里用 types.includes(自定义MIME) 做准入判断**：
-              // HTML5 规范下 dragover 期间 DataTransfer.types 未必包含 dragstart
-              // 里 setData 的自定义类型（浏览器可在 dragover 期间限制读取），
-              // 判得太严会导致 preventDefault 不执行 -> **drop 永不触发**，
-              // 表现为「拖拽没反应」。故此处一律接收，在 drop 里再严格解析。
-              onDragOver={(e) => {
-                e.preventDefault(); // 必需，否则不会触发 drop
-                e.dataTransfer.dropEffect = "move";
-                setDropId(f.folder.id);
-              }}
-              onDragLeave={() => setDropId((d) => (d === f.folder.id ? null : d))}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDropId(null);
-                // 严格解析：拿不到合法 id 数组就什么都不做，绝不静默移动主机
-                const raw = e.dataTransfer.getData("application/x-pingboard-targets");
-                let ids: number[] = [];
-                try {
-                  const parsed: unknown = JSON.parse(raw);
-                  if (Array.isArray(parsed)) {
-                    ids = parsed.filter((x): x is number => typeof x === "number");
-                  }
-                } catch {
-                  ids = [];
-                }
-                if (ids.length === 0) return;
-                // 临时区 id 0 在后端是「移出文件夹」(None)
-                onDropTargets(ids, f.folder.id === TEMP_AREA_ID ? null : f.folder.id);
-              }}
+              // 拖拽落点：自实现拖拽靠「鼠标扫过」判定，不依赖 HTML5 DnD
+              onMouseEnter={() => onDragEnterFolder?.(f.folder.id)}
+              onMouseLeave={() => onDragEnterFolder?.(null)}
               className={`mx-1 px-1.5 py-1 rounded flex items-center gap-1.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 ${on ? "" : "opacity-60"} ${
-                dropId === f.folder.id ? "ring-2 ring-sky-500 bg-sky-50 dark:bg-sky-950/40" : ""
+                hoverId === f.folder.id ? "ring-2 ring-sky-500 bg-sky-50 dark:bg-sky-950/40" : ""
               }`}
               onClick={() => onToggle(f.folder.id)}
               title={on ? "点击取消勾选" : "点击勾选（筛选到此文件夹）"}

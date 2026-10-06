@@ -126,8 +126,6 @@ const App: React.FC = () => {
   const [showExport, setShowExport] = React.useState(false);
   /** Shift 连续选择的锚点；普通点击刷新，Shift 点击不动 */
   const [anchorId, setAnchorId] = React.useState<number | null>(null);
-  /** 正在被拖拽的主机 id（非 null 时主表显示拖影提示） */
-  const [draggingIds, setDraggingIds] = React.useState<number[] | null>(null);
   /** 右键菜单：{ x, y } 为**视觉坐标**（来自 MouseEvent），ids 为待移动的主机 */
   const [moveMenu, setMoveMenu] = React.useState<{
     x: number;
@@ -535,6 +533,78 @@ const App: React.FC = () => {
     [folders, refreshFolders, showToast]
   );
 
+  /* ---------------- 拖拽移动（自实现，不用 HTML5 DnD） ----------------
+     🩸 不用原生 draggable：实测在 Tauri WebView2 + <table> 下 dragstart
+     根本不触发（无拖影、无放置高亮），原生 DnD 在表格行上的行为跨环境
+     差异极大。改用鼠标事件状态机：按下 -> 移动超阈值 -> 激活 -> 松开落点。
+     用 ref 保存可变状态，避免在 setState updater 里做副作用。 */
+  const rowDragRef = React.useRef<{
+    ids: number[];
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+    hoverId: number | null;
+    active: boolean;
+  } | null>(null);
+  const [rowDragView, setRowDragView] = React.useState<{
+    ids: number[];
+    x: number;
+    y: number;
+    hoverId: number | null;
+    active: boolean;
+  } | null>(null);
+  const DRAG_THRESHOLD = 5; // px，小于该位移视为「点击」而非拖动
+
+  React.useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const d = rowDragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      const active = d.active || Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD;
+      const next = { ...d, x: e.clientX, y: e.clientY, active };
+      rowDragRef.current = next;
+      setRowDragView({
+        ids: next.ids,
+        x: next.x,
+        y: next.y,
+        hoverId: next.hoverId,
+        active: next.active,
+      });
+    };
+    const onUp = () => {
+      const d = rowDragRef.current;
+      rowDragRef.current = null;
+      setRowDragView(null);
+      // 未越过阈值 = 普通点击；未落在文件夹上 = 取消
+      if (d && d.active && d.hoverId !== null) {
+        moveTargetsTo(d.ids, d.hoverId === 0 ? null : d.hoverId);
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [moveTargetsTo]);
+
+  /** 侧边栏某行被鼠标扫过（仅拖拽激活时才记落点） */
+  const onDragEnterFolder = React.useCallback((id: number | null) => {
+    const d = rowDragRef.current;
+    if (!d) return;
+    if (id === null) {
+      if (d.hoverId === null) return;
+      rowDragRef.current = { ...d, hoverId: null };
+      setRowDragView((v) => (v === null ? null : { ...v, hoverId: null }));
+      return;
+    }
+    if (!d.active) return; // 未激活时不记录，避免普通移动误判
+    rowDragRef.current = { ...d, hoverId: id };
+    setRowDragView((v) => (v === null ? null : { ...v, hoverId: id }));
+  }, []);
+
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -715,8 +785,10 @@ const App: React.FC = () => {
   );
 
   // 已有目标 host 列表（小写化），用于「添加主机」对话框的跨批次重复检测
-  const existingHosts = React.useMemo(
-    () => snapshot.targets.map((t) => t.host.toLowerCase()),
+  // 已有目标（host + 归属）。判重**只在同文件夹内**进行 —— 跨文件夹允许
+  // 重复（用户定稿 2026-10-06），故不能像以前那样只传 host 字符串数组。
+  const existingTargets = React.useMemo(
+    () => snapshot.targets.map((t) => ({ host: t.host, folder_id: t.folder_id })),
     [snapshot.targets]
   );
 
@@ -825,6 +897,8 @@ const App: React.FC = () => {
         onClearAll={() => setFolderScope(new Set())}
         onSelectAll={() => setFolderScope(new Set(folders.map((f) => f.folder.id)))}
         onDropTargets={moveTargetsTo}
+        onDragEnterFolder={onDragEnterFolder}
+        hoverId={rowDragView?.hoverId ?? null}
         onCreate={(name, color) => {
           api
             .createFolder(name, color)
@@ -922,8 +996,18 @@ const App: React.FC = () => {
               onRowClick={handleRowClick}
               onToggleSelect={handleToggleSelect}
               onSelectRange={handleSelectRange}
-              onDragStart={setDraggingIds}
-              onDragEnd={() => setDraggingIds(null)}
+              onDragStart={(ids, at) => {
+                rowDragRef.current = {
+                  ids,
+                  startX: at.x,
+                  startY: at.y,
+                  x: at.x,
+                  y: at.y,
+                  hoverId: null,
+                  active: false,
+                };
+                setRowDragView(null);
+              }}
               onContextMenu={(ids, pos) => setMoveMenu({ x: pos.x, y: pos.y, ids })}
               anchorId={anchorId}
               onToggleSelectAll={handleToggleSelectAll}
@@ -970,7 +1054,7 @@ const App: React.FC = () => {
       <AddTargetsDialog
         open={showAdd}
         running={snapshot.running}
-        existingHosts={existingHosts}
+        existing={existingTargets}
         folders={liveFolders}
         onClose={() => setShowAdd(false)}
         onAdded={(ids) => {
@@ -995,6 +1079,28 @@ const App: React.FC = () => {
         onClose={() => setShowSettings(false)}
         onSaved={() => showToast("设置已保存并应用")}
       />
+
+      {/* 拖影：跟随光标提示正在移动几台（🩸 R7：视觉坐标除以 zoom 因子）*/}
+      {rowDragView !== null && rowDragView.active && (
+        <div
+          className="fixed z-[80] pointer-events-none px-2.5 py-1 rounded bg-slate-800 dark:bg-slate-100 text-white dark:text-slate-900 text-[12px] shadow-lg whitespace-nowrap"
+          style={{
+            left: rowDragView.x / currentZoomFactor() + 12,
+            top: rowDragView.y / currentZoomFactor() + 12,
+          }}
+        >
+          移动 {rowDragView.ids.length} 台主机
+          {rowDragView.hoverId !== null && (
+            <>
+              {" → "}
+              {rowDragView.hoverId === 0
+                ? "临时区"
+                : (folders.find((f) => f.folder.id === rowDragView.hoverId)?.folder.name ??
+                  "(未命名)")}
+            </>
+          )}
+        </div>
+      )}
 
       {/* 右键菜单：移动到文件夹（拖拽的可靠替代通道）。
           🩸 R7：clientX/Y 是**视觉坐标**，定位前必须除以 currentZoomFactor()，

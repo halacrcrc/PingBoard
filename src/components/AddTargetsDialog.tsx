@@ -12,7 +12,10 @@ export interface AddTargetsDialogProps {
   /** 立即开始 ping（默认勾选） */
   running: boolean;
   /** 列表中已有目标的 host 列表（已小写化），用于跨批次重复检测 */
-  existingHosts: string[];
+  /** 已有目标（**全量**，判重时按 folderId 过滤出同文件夹的那些）。
+   *  ⚠️ 这里必须给 host + folder_id 而非仅 host 字符串数组 ——
+   *  跨文件夹允许重复，判重范围由 folderId 决定。 */
+  existing: ReadonlyArray<{ host: string; folder_id: number | null }>;
   /** v1.1.10：可选的目标文件夹；`id === 0` 为临时区。空数组则只显示「临时区」 */
   folders?: FolderEntry[];
 }
@@ -138,12 +141,26 @@ export function tableToBatchText(rows: string[][]): string {
 }
 
 /**
- * 跨批次重复检测（纯函数）：返回 entries 中与已有目标重复的 host 原文。
- * 比较规则与后端口径一致：host 去首尾空白后转小写；重复判定只在前端 UI 拦截。
- * 单个添加、批量粘贴与文件导入三条路径共用，保证口径一致。
+ * 跨批次重复检测（纯函数）：返回 entries 中与**同一文件夹内**已有目标重复的 host。
+ *
+ * 🩸 口径（用户定稿 2026-10-06）：**不同文件夹允许出现相同 IP**，
+ * 判重只在「本次要加入的文件夹」内部进行。此前是全局判重，导致
+ * A 文件夹已有 1.1.1.1 时，B 文件夹再也加不进同一个 IP —— 实际使用中
+ * 同一台机器常需在多个分组里各记一份。
+ *
+ * 比较规则：host 去首尾空白后转小写；`folder_id` 相同（`null` 视为同一组，
+ * 即临时区）。重复判定只在前端 UI 拦截。
  */
-export function findDuplicateHosts(entries: TargetEntry[], existingHosts: string[]): string[] {
-  const set = new Set(existingHosts.map((h) => h.trim().toLowerCase()));
+export function findDuplicateHosts(
+  entries: TargetEntry[],
+  existing: ReadonlyArray<{ host: string; folder_id: number | null }>,
+  folderId: number | null
+): string[] {
+  const set = new Set(
+    existing
+      .filter((t) => (t.folder_id ?? 0) === (folderId ?? 0))
+      .map((t) => t.host.trim().toLowerCase())
+  );
   const dups: string[] = [];
   for (const e of entries) {
     if (set.has(e.host.trim().toLowerCase())) dups.push(e.host);
@@ -165,13 +182,17 @@ export type AddDecision =
  * 于是「测试全绿」给出了虚假安全感（见 docs/code-review.md §6「能失败才证明测试有效」）。
  * 决策集中到这一个函数后，三条提交路径只有一处接线，配合 tests 中的静态接线守卫才守得住。
  */
-export function decideAdd(entries: TargetEntry[], existingHosts: string[]): AddDecision {
+export function decideAdd(
+  entries: TargetEntry[],
+  existing: ReadonlyArray<{ host: string; folder_id: number | null }>,
+  folderId: number | null
+): AddDecision {
   if (entries.length === 0) return { action: "reject" };
-  const dups = findDuplicateHosts(entries, existingHosts);
+  const dups = findDuplicateHosts(entries, existing, folderId);
   return dups.length === 0 ? { action: "add", entries } : { action: "confirm", entries, dups };
 }
 
-const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existingHosts, folders }) => {
+const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAdded, running, existing, folders }) => {
   const [tab, setTab] = React.useState<"single" | "batch" | "file">("single");
   const [host, setHost] = React.useState("");
   const [name, setName] = React.useState("");
@@ -215,11 +236,17 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
     if (folderId !== null && !validFolderIds.has(folderId)) setFolderId(null);
   }, [validFolderIds, folderId]);
 
-  // 已有目标的 host 集合（去首尾空白 + 小写），用 Set 保证 O(1) 查找。
+  // 已有目标的 host 集合（去首尾空白 + 小写），**只含当前所选文件夹内的那些**。
+  // 🩸 跨文件夹允许重复（用户定稿 2026-10-06），故判重范围必须随 folderId 变。
   // ⚠️ 必须在 `if (!open) return null` 之前无条件调用（React Hooks 规则：hook 不得位于条件 return 之后）
   const existingSet = React.useMemo(
-    () => new Set(existingHosts.map((h) => h.trim().toLowerCase())),
-    [existingHosts]
+    () =>
+      new Set(
+        existing
+          .filter((t) => (t.folder_id ?? 0) === (folderId ?? 0))
+          .map((t) => t.host.trim().toLowerCase())
+      ),
+    [existing, folderId]
   );
 
   // 文件导入：文本直接解析；表格先规范化为批量文本再解析（复用同一套解析逻辑）
@@ -242,9 +269,9 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
 
   // 当前待添加列表中与「已有目标」重复的条目（比较规则见 findDuplicateHosts）
   const dupInfo = React.useMemo(() => {
-    const hosts = findDuplicateHosts(currentEntries, existingHosts);
+    const hosts = findDuplicateHosts(currentEntries, existing, folderId);
     return { count: hosts.length, hosts };
-  }, [currentEntries, existingHosts]);
+  }, [currentEntries, existing, folderId]);
 
   if (!open) return null;
 
@@ -299,7 +326,7 @@ const AddTargetsDialog: React.FC<AddTargetsDialogProps> = ({ open, onClose, onAd
    * 超出其能力范围，根治要靠运行时断言（api 层间谍，见待办）。
    */
   const submitEntries = (entries: TargetEntry[]) => {
-    const d = decideAdd(entries, existingHosts);
+    const d = decideAdd(entries, existing, folderId);
     if (d.action === "reject") {
       setError("请输入至少一个主机名或 IP 地址");
       return;

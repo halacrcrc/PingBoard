@@ -347,7 +347,7 @@ check("findDuplicateHosts 命中已有目标（大小写不敏感 + 去首尾空
   eq(
     findDuplicateHosts(
       [{ host: "WWW.Baidu.COM", name: "x" }, { host: " 223.5.5.5 ", name: "y" }],
-      ["www.baidu.com", "223.5.5.5"]
+      [{ host: "www.baidu.com", folder_id: null }, { host: "223.5.5.5", folder_id: null }]
     ),
     ["WWW.Baidu.COM", " 223.5.5.5 "],
     "重复项应返回 host 原文"
@@ -355,17 +355,67 @@ check("findDuplicateHosts 命中已有目标（大小写不敏感 + 去首尾空
 });
 
 check("findDuplicateHosts 无重复 → 空数组；空输入 → 空数组", () => {
-  eq(findDuplicateHosts([{ host: "9.9.9.9", name: "x" }], ["8.8.8.8"]), []);
-  eq(findDuplicateHosts([], ["8.8.8.8"]), []);
-  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], []), []);
+  eq(findDuplicateHosts([{ host: "9.9.9.9", name: "x" }], [{ host: "8.8.8.8", folder_id: null }], null), []);
+  eq(findDuplicateHosts([], [{ host: "8.8.8.8", folder_id: null }], null), []);
+  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], [], null), []);
 });
 
+/* ---------- 判重只限同文件夹（用户定稿 2026-10-06） ---------- */
+
+check("判重：同文件夹内重复 -> 拦截 🩸", () => {
+  const existing = [{ host: "1.1.1.1", folder_id: 1 }];
+  eq(findDuplicateHosts([{ host: "1.1.1.1", name: "x" }], existing, 1), ["1.1.1.1"]);
+  eq(decideAdd([{ host: "1.1.1.1", name: "x" }], existing, 1).action, "confirm");
+});
+
+check("判重：跨文件夹相同 IP -> 放行 🩸", () => {
+  // 用户定稿：不同文件夹允许出现相同 IP。此前是全局判重，导致
+  // A 文件夹已有 1.1.1.1 时，B 文件夹再也加不进同一个 IP。
+  const existing = [{ host: "1.1.1.1", folder_id: 1 }];
+  eq(findDuplicateHosts([{ host: "1.1.1.1", name: "x" }], existing, 2), [], "文件夹2 应放行");
+  eq(findDuplicateHosts([{ host: "1.1.1.1", name: "x" }], existing, null), [], "临时区也应放行");
+  eq(decideAdd([{ host: "1.1.1.1", name: "x" }], existing, 2).action, "add", "跨文件夹直接添加");
+});
+
+check("判重：两个文件夹各有同一 IP，互不干扰 🩸", () => {
+  const existing = [
+    { host: "8.8.8.8", folder_id: 1 },
+    { host: "8.8.8.8", folder_id: 2 },
+  ];
+  // 在文件夹 1 加 -> 被文件夹 1 的那条拦住
+  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], existing, 1).length, 1);
+  // 在文件夹 3 加（不存在）-> 放行
+  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], existing, 3).length, 0);
+  // 临时区(0) 加 -> 放行（两条都在文件夹里）
+  eq(findDuplicateHosts([{ host: "8.8.8.8", name: "x" }], existing, null).length, 0);
+});
+
+check("判重：临时区内部仍然判重（folder_id null 视为同一组）", () => {
+  const existing = [{ host: "9.9.9.9", folder_id: null }];
+  eq(findDuplicateHosts([{ host: "9.9.9.9", name: "x" }], existing, null).length, 1);
+  // 显式 0（临时区哨兵）与 null 归一后应视为同一组
+  eq(findDuplicateHosts([{ host: "9.9.9.9", name: "x" }], [{ host: "9.9.9.9", folder_id: 0 }], null).length, 1);
+});
+
+check("判重：批次内跨文件夹混合时，各自只与同文件夹的已有项比对", () => {
+  const existing = [
+    { host: "1.1.1.1", folder_id: 1 },
+    { host: "2.2.2.2", folder_id: 2 },
+  ];
+  // 加到文件夹 2：2.2.2.2 重复，1.1.1.1 不重复（它在文件夹 1）
+  const d = findDuplicateHosts(
+    [{ host: "1.1.1.1", name: "a" }, { host: "2.2.2.2", name: "b" }],
+    existing,
+    2
+  );
+  eq(d, ["2.2.2.2"], "只应命中同文件夹的那条");
+});
 /* ---------- decideAdd：添加决策（空 / 确认 / 直接添加） ---------- */
 check("decideAdd 三条路径同口径：单条输入与批量解析结果决策一致", () => {
   // 单个添加路径：[{host: 输入框原文}]；批量路径：parseBatch 输出 —— 两者过同一决策必须等价
-  const existing = ["192.0.2.1"];
-  const single = decideAdd([{ host: "192.0.2.1", name: "192.0.2.1" }], existing);
-  const batch = decideAdd(parseBatch("192.0.2.1"), existing);
+  const existing = [{ host: "192.0.2.1", folder_id: null }];
+  const single = decideAdd([{ host: "192.0.2.1", name: "192.0.2.1" }], existing, null);
+  const batch = decideAdd(parseBatch("192.0.2.1"), existing, null);
   eq(single.action, "confirm", "单个添加必须走确认（曾直接 doAdd 绕过检测）");
   eq(batch.action, "confirm", "批量路径同样走确认");
   eq(single.dups.length, 1, "单个添加必须检出 1 个重复");
@@ -374,18 +424,18 @@ check("decideAdd 三条路径同口径：单条输入与批量解析结果决策
 });
 
 check("decideAdd 空输入 → reject", () => {
-  eq(decideAdd([], ["a"]).action, "reject", "空条目必须被拒绝");
+  eq(decideAdd([], [{ host: "a", folder_id: null }], null).action, "reject", "空条目必须被拒绝");
 });
 
 check("decideAdd 命中已有目标 → confirm 且带回重复 host 原文", () => {
-  const d = decideAdd([{ host: "192.0.2.1", name: "x" }], ["192.0.2.1"]);
+  const d = decideAdd([{ host: "192.0.2.1", name: "x" }], [{ host: "192.0.2.1", folder_id: null }], null);
   eq(d.action, "confirm");
   eq(d.dups, ["192.0.2.1"], "dups 应为 host 原文");
   eq(d.entries.length, 1, "confirm 分支必须原样带回 entries");
 });
 
 check("decideAdd 无重复 → add（直接提交，不弹确认）", () => {
-  const d = decideAdd([{ host: "9.9.9.9", name: "x" }], ["192.0.2.1"]);
+  const d = decideAdd([{ host: "9.9.9.9", name: "x" }], [{ host: "192.0.2.1", folder_id: null }], null);
   eq(d.action, "add");
   eq(d.entries, [{ host: "9.9.9.9", name: "x" }], "add 分支必须原样带回 entries");
 });
@@ -396,7 +446,8 @@ check("decideAdd 混合批次：部分重复仍走 confirm，dups 只含重复�
       { host: "10.0.0.1", name: "新" },
       { host: "192.0.2.1", name: "旧" },
     ],
-    ["192.0.2.1"]
+    [{ host: "192.0.2.1", folder_id: null }],
+    null
   );
   eq(d.action, "confirm");
   eq(d.dups, ["192.0.2.1"], "dups 只应含重复项，不含新增项");
@@ -406,12 +457,12 @@ check("decideAdd 混合批次：部分重复仍走 confirm，dups 只含重复�
 check("decideAdd 属性：action 只可能是 reject / add / confirm 三种", () => {
   const allowed = ["reject", "add", "confirm"];
   const samples = [
-    [[], ["a"]],
-    [[{ host: "1.1.1.1", name: "a" }], ["2.2.2.2"]],
-    [[{ host: "1.1.1.1", name: "a" }], ["1.1.1.1"]],
+    [[], [{ host: "a", folder_id: null }]],
+    [[{ host: "1.1.1.1", name: "a" }], [{ host: "2.2.2.2", folder_id: null }]],
+    [[{ host: "1.1.1.1", name: "a" }], [{ host: "1.1.1.1", folder_id: null }]],
   ];
   for (const [entries, existing] of samples) {
-    const a = decideAdd(entries, existing).action;
+    const a = decideAdd(entries, existing, null).action;
     if (!allowed.includes(a)) throw new Error(`出现未知 action：${a}`);
   }
 });
