@@ -359,7 +359,7 @@ npx tauri build --bundles nsis
 
 ```
 pinginfo/
-├─ README.md / LICENSE
+├─ README.md / CHANGELOG.md / LICENSE
 ├─ package.json / package-lock.json / vite.config.ts
 ├─ tsconfig.json / tsconfig.node.json
 ├─ tailwind.config.js / postcss.config.js / index.html
