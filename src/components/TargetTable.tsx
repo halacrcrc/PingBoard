@@ -50,6 +50,8 @@ export interface TargetTableProps {
   onDragStart?: (ids: number[]) => void;
   /** 拖拽结束（无论是否放下） */
   onDragEnd?: () => void;
+  /** 右键菜单：移动到文件夹（拖拽的可靠替代通道） */
+  onContextMenu?: (ids: number[], pos: { x: number; y: number }) => void;
   /** 表头全选/全不选（仅作用当前传入的 targets） */
   onToggleSelectAll: (selectAll: boolean) => void;
   historyLen: number;
@@ -123,6 +125,7 @@ const TargetTable: React.FC<TargetTableProps> = ({
   onSelectRange,
   onDragStart,
   onDragEnd,
+  onContextMenu,
   onToggleSelectAll,
   historyLen,
   unreadIds,
@@ -217,6 +220,16 @@ const TargetTable: React.FC<TargetTableProps> = ({
                   onDragStart?.(ids);
                 }}
                 onDragEnd={() => onDragEnd?.()}
+                onContextMenu={(e) => {
+                  // 右键 = **拖拽的可靠替代通道**。HTML5 拖放在 WebView2 +
+                  // 表格场景下有边界风险（draggable 表格行的原生拖拽行为、
+                  // 文本/控件区域的起点差异），故必须有一条不依赖拖放的路径，
+                  // 否则一旦拖放失效就完全没有移动归属的办法。
+                  e.preventDefault();
+                  const ids = dragMoveIds(t.id, selected);
+                  if (ids.length === 0) return;
+                  onContextMenu?.(ids, { x: e.clientX, y: e.clientY });
+                }}
                 onClick={(e) => {
                   // 行点击：Shift 连续选择也必须按**可见+排序后**的顺序取区间，
                   // 故在这里算好 ids 再交给 App（App 拿不到排序结果）。

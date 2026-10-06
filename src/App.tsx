@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { clampPaneWidth, exportScopeIds, filterByFolderScope, folderCounts, loadPaneWidth, mergeSelection, PANE_LIMITS, savePaneWidth, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
+import { clampPaneWidth, currentZoomFactor, exportScopeIds, filterByFolderScope, folderCounts, loadPaneWidth, mergeSelection, PANE_LIMITS, savePaneWidth, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
 
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
@@ -128,6 +128,26 @@ const App: React.FC = () => {
   const [anchorId, setAnchorId] = React.useState<number | null>(null);
   /** 正在被拖拽的主机 id（非 null 时主表显示拖影提示） */
   const [draggingIds, setDraggingIds] = React.useState<number[] | null>(null);
+  /** 右键菜单：{ x, y } 为**视觉坐标**（来自 MouseEvent），ids 为待移动的主机 */
+  const [moveMenu, setMoveMenu] = React.useState<{
+    x: number;
+    y: number;
+    ids: number[];
+  } | null>(null);
+
+  // 点击任意处 / 滚动 / 缩放即收起右键菜单（浮层不能挂在 DOM 里常驻）
+  React.useEffect(() => {
+    if (moveMenu === null) return;
+    const close = () => setMoveMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [moveMenu]);
 
   /* ---------------- 三区域宽度（v1.2.1，可拖动） ---------------- */
   // 初值即既有观感（侧边栏 192 / 详情 420），不动手时界面与 v1.2.0 完全一致。
@@ -495,6 +515,26 @@ const App: React.FC = () => {
       .catch((e) => showToast("读取文件夹失败：" + String(e)));
   }, [showToast]);
 
+  /** 执行移动（拖拽放下与右键菜单共用同一入口） */
+  const moveTargetsTo = React.useCallback(
+    (ids: number[], folderId: number | null) => {
+      if (ids.length === 0) return;
+      const name =
+        folderId === null
+          ? "临时区"
+          : (folders.find((f) => f.folder.id === folderId)?.folder.name ?? "(未命名)");
+      // 不用 guard()：它会把返回类型擦成 void，而这里需要台数
+      api
+        .moveTargets(ids, folderId)
+        .then((n: number) => {
+          showToast(n > 0 ? `已移动 ${n} 台主机到「${name}」` : "主机已在目标位置");
+          refreshFolders();
+        })
+        .catch((e: unknown) => showToast(`移动失败：${String(e)}`));
+    },
+    [folders, refreshFolders, showToast]
+  );
+
   const handleSort = (key: SortKey) => {
     if (key === sortKey) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -784,23 +824,7 @@ const App: React.FC = () => {
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}
         onClearAll={() => setFolderScope(new Set())}
         onSelectAll={() => setFolderScope(new Set(folders.map((f) => f.folder.id)))}
-        onDropTargets={(ids, fid) => {
-          if (ids.length === 0) return;
-          const name =
-            fid === null
-              ? "临时区"
-              : (folders.find((f) => f.folder.id === fid)?.folder.name ?? "(未命名)");
-          // 不用 guard()：它会把返回类型擦成 void，而这里需要 moveTargets 的台数
-          api
-            .moveTargets(ids, fid)
-            .then((n: number) => {
-              showToast(
-                n > 0 ? `已移动 ${n} 台主机到「${name}」` : "主机已在目标位置，无需移动"
-              );
-              refreshFolders();
-            })
-            .catch((e: unknown) => showToast(`移动失败：${String(e)}`));
-        }}
+        onDropTargets={moveTargetsTo}
         onCreate={(name, color) => {
           api
             .createFolder(name, color)
@@ -900,6 +924,7 @@ const App: React.FC = () => {
               onSelectRange={handleSelectRange}
               onDragStart={setDraggingIds}
               onDragEnd={() => setDraggingIds(null)}
+              onContextMenu={(ids, pos) => setMoveMenu({ x: pos.x, y: pos.y, ids })}
               anchorId={anchorId}
               onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
@@ -970,6 +995,43 @@ const App: React.FC = () => {
         onClose={() => setShowSettings(false)}
         onSaved={() => showToast("设置已保存并应用")}
       />
+
+      {/* 右键菜单：移动到文件夹（拖拽的可靠替代通道）。
+          🩸 R7：clientX/Y 是**视觉坐标**，定位前必须除以 currentZoomFactor()，
+          否则界面缩放开启时菜单会整体偏移。 */}
+      {moveMenu !== null && (
+        <div
+          className="fixed z-[70] min-w-[180px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 py-1 shadow-xl"
+          style={{
+            left: moveMenu.x / currentZoomFactor(),
+            top: moveMenu.y / currentZoomFactor(),
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="px-3 py-1 text-[11px] text-slate-500 dark:text-slate-400">
+            移动 {moveMenu.ids.length} 台主机到
+          </div>
+          {liveFolders.map((f) => (
+            <button
+              key={f.folder.id}
+              className="w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
+              onClick={() => {
+                moveTargetsTo(moveMenu.ids, f.folder.id === 0 ? null : f.folder.id);
+                setMoveMenu(null);
+              }}
+            >
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  f.folder.id === 0 ? "bg-slate-500" : `bg-sky-600`
+                }`}
+                aria-hidden="true"
+              />
+              <span className="flex-1 truncate">{f.folder.name || "(未命名)"}</span>
+              <span className="text-[11px] tabular-nums text-slate-400">{f.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmClear}

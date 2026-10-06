@@ -59,8 +59,10 @@ const PaneResizer: React.FC<PaneResizerProps> = ({ onResize, onReset, label }) =
       aria-orientation="vertical"
       aria-label={label}
       tabIndex={0}
-      title={`拖动调整宽度（双击恢复默认）`}
-      className="w-1 shrink-0 cursor-col-resize bg-slate-200 dark:bg-slate-700 hover:bg-sky-500 dark:hover:bg-sky-500 transition-colors"
+      title="拖动调整宽度（双击恢复默认；也可聚焦后用左右方向键）"
+      // 🩸 宽度 6px + 默认色 slate-300：此前 4px + slate-200 在浅色主题下
+      // 几乎不可见，用户根本不知道这里能拖（反馈为「功能没实现」）。
+      className="w-1.5 shrink-0 cursor-col-resize bg-slate-300 dark:bg-slate-600 hover:bg-sky-500 active:bg-sky-600 dark:hover:bg-sky-500"
       onMouseDown={(e) => {
         e.preventDefault();
         draggingRef.current = {

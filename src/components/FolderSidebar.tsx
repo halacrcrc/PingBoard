@@ -105,7 +105,9 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   const allSelected = folders.length > 0 && scope.size >= folders.length;
   return (
     // 宽度由外层容器控制（v1.2.1 起可拖动）；此处用 w-full 撑满容器
-    <div className="w-full flex flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+    // ⚠️ 刻意**不加 border-r**：外侧紧挨着可拖动的分隔条，两条线并排会让人
+    // 误以为那条边框才是把手（而它不可拖），反馈为「拖动没实现」。
+    <div className="w-full flex flex-col bg-white dark:bg-slate-900">
       <div className="px-2.5 h-9 flex items-center justify-between border-b border-slate-200 dark:border-slate-700 shrink-0">
         <span className="text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">范围</span>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -142,17 +144,22 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
             <div
               key={f.folder.id}
               // 拖拽放置目标：从主表把 IP 拖到这里即移动归属
+              //
+              // 🩸 **不要在 dragover 里用 types.includes(自定义MIME) 做准入判断**：
+              // HTML5 规范下 dragover 期间 DataTransfer.types 未必包含 dragstart
+              // 里 setData 的自定义类型（浏览器可在 dragover 期间限制读取），
+              // 判得太严会导致 preventDefault 不执行 -> **drop 永不触发**，
+              // 表现为「拖拽没反应」。故此处一律接收，在 drop 里再严格解析。
               onDragOver={(e) => {
-                if (!e.dataTransfer.types.includes("application/x-pingboard-targets")) return;
                 e.preventDefault(); // 必需，否则不会触发 drop
                 e.dataTransfer.dropEffect = "move";
                 setDropId(f.folder.id);
               }}
               onDragLeave={() => setDropId((d) => (d === f.folder.id ? null : d))}
               onDrop={(e) => {
-                if (!e.dataTransfer.types.includes("application/x-pingboard-targets")) return;
                 e.preventDefault();
                 setDropId(null);
+                // 严格解析：拿不到合法 id 数组就什么都不做，绝不静默移动主机
                 const raw = e.dataTransfer.getData("application/x-pingboard-targets");
                 let ids: number[] = [];
                 try {
@@ -161,8 +168,9 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
                     ids = parsed.filter((x): x is number => typeof x === "number");
                   }
                 } catch {
-                  ids = []; // 解析失败绝不静默移动任何主机
+                  ids = [];
                 }
+                if (ids.length === 0) return;
                 // 临时区 id 0 在后端是「移出文件夹」(None)
                 onDropTargets(ids, f.folder.id === TEMP_AREA_ID ? null : f.folder.id);
               }}
