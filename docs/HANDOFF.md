@@ -1,6 +1,6 @@
 # PingBoard 交接文档
 
-> 版本：v1.2.0 · 最后更新 2026-10-04 · 面向「新会话 / 新 agent 接手」
+> 版本：v1.2.1 · 最后更新 2026-10-06 · 面向「新会话 / 新 agent 接手」
 > 本文是**接手时的第一个读点**，只做状态交代与索引。细节一律引用专题文档，不在此重复。
 
 ---
@@ -15,8 +15,8 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 
 | 项 | 值 |
 |---|---|
-| 最新发布版本 | **v1.2.0**（tag `v1.2.0` 与 GitHub Release 待发） |
-| 当前开发版本 | **v1.2.0** —— 批次 A-F 全部完成，代码已推送 `origin/main` |
+| 最新发布版本 | **v1.2.0**（tag `v1.2.0`，三包已发布） |
+| 当前开发版本 | **v1.2.1** —— 拖拽归入文件夹 + 三区域宽度可调 |
 | 当前 HEAD（仓库侧） | 见 `git log -1`，工作区干净 |
 | Rust 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **130 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
 | Tauri 命令数 | **24**（19 → 24，v1.1.10 新增 5 个文件夹命令；导出/添加接口仅加参数） |
@@ -51,7 +51,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 - 安装包通过 **Release 附件**分发（见 `github-push-and-release` 技能），仓库只管源码。
 推历史包时用 `git add <具体路径>`，**永远不要在仓库根裸跑 `git add -A`**。
 
-`src-tauri/tauri.conf.json` **基线 md5 = `7ca1829b7dcd72cfcf2086b192da037a`（v1.2.0 起，两侧必须始终一致）**。
+`src-tauri/tauri.conf.json` **基线 md5 = `1abf882ed919f6a35cdc028e534184a5`（v1.2.1 起，两侧必须始终一致）**。
 ⚠️ **提版本后基线必然变化，必须重记并同步两侧**（v1.1.8 时期的旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。
 打包变体时只改**构建侧 D 盘**的 `webviewInstallMode`，构造完立刻还原。
 

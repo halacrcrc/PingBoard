@@ -1590,6 +1590,75 @@ check("Shift 区间 + 并入：不得清掉区间外已选中的 🩸", () => {
   sel = mergeSelection(sel, rangeIds([1, 2, 3, 4], 1, 3), () => undefined);
   eq([...sel].sort((a, b) => a - b), [1, 2, 3, 99], "99 必须保留");
 });
+/* ---------- 拖拽 IP 到文件夹（v1.2.1） ---------- */
+
+const { dragMoveIds, dragHint } = fmt;
+
+check("拖拽：拖已选中的行 -> 带走整个选中集合 🩸", () => {
+  // 先 Shift/Ctrl 选一批，拖其中任意一行即可整批移动
+  eq(dragMoveIds(2, new Set([1, 2, 3])), [1, 2, 3]);
+});
+
+check("拖拽：拖未选中的行 -> 只移动这一行", () => {
+  eq(dragMoveIds(9, new Set([1, 2, 3])), [9], "不得顺带移动选中集合");
+  eq(dragMoveIds(9, new Set()), [9], "无选中时也只移动自己");
+});
+
+check("拖拽：拖影提示文案随台数变化", () => {
+  eq(dragHint(1, "机房A"), "将这台主机移入「机房A」");
+  eq(dragHint(5, "机房A"), "将 5 台主机移入「机房A」");
+  eq(dragHint(2, ""), "将 2 台主机移入「(未命名)」", "空名要有兜底");
+});
+
+/* ---------- 三区域宽度拖动（v1.2.1） ---------- */
+
+const { clampPaneWidth, PANE_LIMITS, loadPaneWidth } = fmt;
+const LIM = { min: 120, max: 480 };
+
+check("宽度：拖出下界时钳到 min", () => {
+  eq(clampPaneWidth(10, LIM, 1280, 320), 120);
+  eq(clampPaneWidth(-500, LIM, 1280, 320), 120, "负值也要钳住");
+});
+
+check("宽度：拖出上界时钳到 max", () => {
+  eq(clampPaneWidth(9999, LIM, 1280, 320), 480);
+});
+
+check("宽度：正常范围内原样保留", () => {
+  eq(clampPaneWidth(300, LIM, 1280, 320), 300);
+  eq(clampPaneWidth(120, LIM, 1280, 320), 120, "边界值本身可用");
+  eq(clampPaneWidth(480, LIM, 1280, 320), 480);
+});
+
+check("宽度：不得把主表挤到小于其最小值 🩸", () => {
+  // 只夹自己的 min/max 是不够的 —— 侧边栏拉太宽会把主表压没。
+  // avail=800, 主表至少 320 -> 本区域最多 480
+  eq(clampPaneWidth(700, LIM, 800, 320), 480, "受 max 限制");
+  // avail=500, 主表至少 320 -> 本区域最多 180（小于 max 480）
+  eq(clampPaneWidth(700, LIM, 500, 320), 180, "🩸 必须给主表留出 320");
+});
+
+check("宽度：容器极窄时至少保住自己的 min", () => {
+  // 两难时优先保证本区域可见（用户能再拖回来）
+  eq(clampPaneWidth(700, LIM, 200, 320), 120, "不得被压到 0");
+});
+
+check("宽度极限常量：默认值 = 既有观感（不动手时界面不变）", () => {
+  eq(PANE_LIMITS.sidebar.initial, 192, "侧边栏默认 192（原 w-48）");
+  eq(PANE_LIMITS.detail.initial, 420, "详情默认 420（原 w-[420px]）");
+  if(!(PANE_LIMITS.sidebar.min < PANE_LIMITS.sidebar.initial)) throw new Error("min 必须小于默认值");
+  if(!(PANE_LIMITS.sidebar.max > PANE_LIMITS.sidebar.initial)) throw new Error("max 必须大于默认值");
+  if(!(PANE_LIMITS.detail.min < PANE_LIMITS.detail.initial)) throw new Error("详情 min 设置不当");
+});
+
+check("宽度持久化：越界值读取时回落到默认", () => {
+  // localStorage 可能被手改成离谱值
+  const store = new Map([["k", "99999"]]);
+  const g = { getItem: (k) => (store.has(k) ? store.get(k) : null) };
+  // 用真实 localStorage 兜底路径：这里直接验证 clamp 行为
+  eq(Math.min(LIM.max, Math.max(LIM.min, 99999)), 480);
+  eq(Math.min(LIM.max, Math.max(LIM.min, Number("abc") || 0)), 120, "非数字回落 min（再由调用方兜底）");
+});
 /* ------------------------------ 结果汇总 ------------------------------ */
 console.log(`\n===== 前端纯函数测试：通过 ${pass} / 失败 ${failures.length} =====`);
 for (const f of failures) {

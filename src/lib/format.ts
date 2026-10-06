@@ -507,3 +507,96 @@ export function rangeIds(
   const hi = Math.max(ai, ti);
   return orderedIds.slice(lo, hi + 1);
 }
+/* ===================== 拖拽 IP 到文件夹 ===================== */
+
+/**
+ * 拖拽一行时，实际要移动的主机 id 列表。
+ *
+ * 规则（与文件管理器一致）：
+ * - 拖的行**已在选中集合里** → 移动**整个选中集合**（拖一个带走一批）
+ * - 否则 → 只移动这一行
+ *
+ * 这样用户先 Shift/Ctrl 选好一批，再拖其中任意一行即可整批移动。
+ */
+export function dragMoveIds(
+  draggedId: number,
+  selected: ReadonlySet<number>
+): number[] {
+  if (selected.has(draggedId)) return [...selected];
+  return [draggedId];
+}
+
+/**
+ * 拖拽提示文案（显示在拖影与放置反馈里）。
+ * 纯函数便于断言「1 台 / N 台」的措辞一致。
+ */
+export function dragHint(n: number, folderName: string): string {
+  const name = folderName || "(未命名)";
+  return n > 1 ? `将 ${n} 台主机移入「${name}」` : `将这台主机移入「${name}」`;
+}
+
+/* ===================== 三区域宽度拖动 ===================== */
+
+/** 各区域宽度极限（px）。**默认值保持既有观感不变**，只在用户拖动后才生效。 */
+export const PANE_LIMITS = {
+  /** 侧边栏：文件夹名 + 台数至少要放得下 */
+  sidebar: { min: 120, max: 480, initial: 192 },
+  /** 详情区：趋势图与事件日志至少要有可读宽度 */
+  detail: { min: 280, max: 720, initial: 420 },
+  /** 主表：13 列，至少要看得到几列（被动挤压，不直接拖动它的宽度） */
+  table: { min: 320 },
+} as const;
+
+/**
+ * 把拖动产生的宽度钳制到合法区间。
+ *
+ * 🩸 必须同时受两侧约束：只夹自己的 min/max 是不够的 —— 侧边栏拉太宽会
+ * 把主表挤到看不见。故接受一个「可用空间」，保证主表始终 >= 其最小宽度。
+ *
+ * @param raw      用户拖出来的原始宽度（CSS px）
+ * @param limits   该区域的 min / max
+ * @param avail    容器可用宽度（用于保证对侧区域不被压垮）
+ * @param otherMin 对侧区域（主表）的最小宽度
+ */
+export function clampPaneWidth(
+  raw: number,
+  limits: { min: number; max: number },
+  avail: number,
+  otherMin: number
+): number {
+  const capped = Math.min(limits.max, Math.max(limits.min, raw));
+  // 给主表留出 otherMin 后，本区域最多还能占多少
+  const roomForMe = Math.max(limits.min, avail - otherMin);
+  return Math.min(capped, roomForMe);
+}
+/**
+ * 读取持久化的区域宽度；越界或解析失败时回落到默认值。
+ *
+ * ⚠️ 存 localStorage 而**不是** Rust 配置：这属于纯界面偏好，
+ * 放进 config.json 会改动配置契约（R1 红线要求新增字段必须带 serde 默认值，
+ * 且会让「配置是唯一记录主机列表的地方」这一定位变模糊）。
+ */
+export function loadPaneWidth(
+  key: string,
+  fallback: number,
+  limits: { min: number; max: number }
+): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(limits.max, Math.max(limits.min, n));
+  } catch {
+    return fallback; // localStorage 被禁用时静默回落
+  }
+}
+
+/** 持久化区域宽度（失败静默忽略，不影响使用） */
+export function savePaneWidth(key: string, width: number): void {
+  try {
+    localStorage.setItem(key, String(Math.round(width)));
+  } catch {
+    /* 忽略 */
+  }
+}

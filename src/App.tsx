@@ -13,7 +13,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { exportScopeIds, filterByFolderScope, folderCounts, mergeSelection, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
+import { clampPaneWidth, exportScopeIds, filterByFolderScope, folderCounts, loadPaneWidth, mergeSelection, PANE_LIMITS, savePaneWidth, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
 
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
@@ -25,6 +25,7 @@ import AddTargetsDialog from "./components/AddTargetsDialog";
 import SettingsDialog from "./components/SettingsDialog";
 import ConfirmDialog from "./components/ConfirmDialog";
 import ExportDialog, { type ExportFormat } from "./components/ExportDialog";
+import PaneResizer from "./components/PaneResizer";
 
 /** 默认设置（与 Rust 侧 PingSettings::default 保持一致） */
 const DEFAULT_SETTINGS: PingSettings = {
@@ -125,6 +126,63 @@ const App: React.FC = () => {
   const [showExport, setShowExport] = React.useState(false);
   /** Shift 连续选择的锚点；普通点击刷新，Shift 点击不动 */
   const [anchorId, setAnchorId] = React.useState<number | null>(null);
+  /** 正在被拖拽的主机 id（非 null 时主表显示拖影提示） */
+  const [draggingIds, setDraggingIds] = React.useState<number[] | null>(null);
+
+  /* ---------------- 三区域宽度（v1.2.1，可拖动） ---------------- */
+  // 初值即既有观感（侧边栏 192 / 详情 420），不动手时界面与 v1.2.0 完全一致。
+  const [sidebarW, setSidebarW] = React.useState(() =>
+    loadPaneWidth("pb-pane-sidebar", PANE_LIMITS.sidebar.initial, PANE_LIMITS.sidebar)
+  );
+  const [detailW, setDetailW] = React.useState(() =>
+    loadPaneWidth("pb-pane-detail", PANE_LIMITS.detail.initial, PANE_LIMITS.detail)
+  );
+  // 容器宽度用于保证主表不被压垮（clampPaneWidth 需要）
+  const bodyRef = React.useRef<HTMLDivElement | null>(null);
+  const [availW, setAvailW] = React.useState(1280);
+
+  React.useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setAvailW(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const resizeSidebar = React.useCallback(
+    (delta: number) => {
+      setSidebarW((w) => {
+        const next = clampPaneWidth(
+          w + delta,
+          PANE_LIMITS.sidebar,
+          availW - detailW,
+          PANE_LIMITS.table.min
+        );
+        savePaneWidth("pb-pane-sidebar", next);
+        return next;
+      });
+    },
+    [availW, detailW]
+  );
+
+  const resizeDetail = React.useCallback(
+    (delta: number) => {
+      // 详情在右侧，向右拖应**变窄**，故取负
+      setDetailW((w) => {
+        const next = clampPaneWidth(
+          w - delta,
+          PANE_LIMITS.detail,
+          availW - sidebarW,
+          PANE_LIMITS.table.min
+        );
+        savePaneWidth("pb-pane-detail", next);
+        return next;
+      });
+    },
+    [availW, sidebarW]
+  );
   // v1.1.10 文件夹：勾选的文件夹 id；**空集 = 全部**（口径见 docs/folder-design.md 7.1）
   const [folderScope, setFolderScope] = React.useState<Set<number>>(new Set());
   const [folders, setFolders] = React.useState<FolderEntry[]>([]);
@@ -716,7 +774,8 @@ const App: React.FC = () => {
       />
 
 
-      <div className="flex-1 flex min-h-0">
+      <div ref={bodyRef} className="flex-1 flex min-h-0">
+      <div style={{ width: sidebarW }} className="shrink-0 flex">
       <FolderSidebar
         folders={liveFolders}
         counts={folderCountsMap}
@@ -725,6 +784,23 @@ const App: React.FC = () => {
         onToggle={(id) => setFolderScope((s) => toggleScope(s, id))}
         onClearAll={() => setFolderScope(new Set())}
         onSelectAll={() => setFolderScope(new Set(folders.map((f) => f.folder.id)))}
+        onDropTargets={(ids, fid) => {
+          if (ids.length === 0) return;
+          const name =
+            fid === null
+              ? "临时区"
+              : (folders.find((f) => f.folder.id === fid)?.folder.name ?? "(未命名)");
+          // 不用 guard()：它会把返回类型擦成 void，而这里需要 moveTargets 的台数
+          api
+            .moveTargets(ids, fid)
+            .then((n: number) => {
+              showToast(
+                n > 0 ? `已移动 ${n} 台主机到「${name}」` : "主机已在目标位置，无需移动"
+              );
+              refreshFolders();
+            })
+            .catch((e: unknown) => showToast(`移动失败：${String(e)}`));
+        }}
         onCreate={(name, color) => {
           api
             .createFolder(name, color)
@@ -748,6 +824,15 @@ const App: React.FC = () => {
             })
             .then(refreshFolders)
             .catch((e) => showToast("删除失败：" + String(e)));
+        }}
+      />
+      </div>
+      <PaneResizer
+        label="调整文件夹区宽度"
+        onResize={resizeSidebar}
+        onReset={() => {
+          setSidebarW(PANE_LIMITS.sidebar.initial);
+          savePaneWidth("pb-pane-sidebar", PANE_LIMITS.sidebar.initial);
         }}
       />
         <div className="flex-1 min-w-0 border-r border-slate-200 dark:border-slate-700">
@@ -813,6 +898,8 @@ const App: React.FC = () => {
               onRowClick={handleRowClick}
               onToggleSelect={handleToggleSelect}
               onSelectRange={handleSelectRange}
+              onDragStart={setDraggingIds}
+              onDragEnd={() => setDraggingIds(null)}
               anchorId={anchorId}
               onToggleSelectAll={handleToggleSelectAll}
               historyLen={snapshot.settings.history_len}
@@ -821,7 +908,15 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="w-[420px] shrink-0 bg-white dark:bg-slate-900">
+      <PaneResizer
+        label="调整主机详情区宽度"
+        onResize={resizeDetail}
+        onReset={() => {
+          setDetailW(PANE_LIMITS.detail.initial);
+          savePaneWidth("pb-pane-detail", PANE_LIMITS.detail.initial);
+        }}
+      />
+        <div style={{ width: detailW }} className="shrink-0 bg-white dark:bg-slate-900">
           <DetailPanel
             target={primaryTarget}
             logs={visiblePrimaryLogs}

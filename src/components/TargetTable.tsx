@@ -2,6 +2,7 @@
 import React from "react";
 import type { Status, TargetState } from "../types";
 import {
+  dragMoveIds,
   fmtMs,
   fmtPct,
   rangeIds,
@@ -45,6 +46,10 @@ export interface TargetTableProps {
    * **ids 由本组件按可见+排序后的顺序算出** —— App 侧拿不到排序结果。
    */
   onSelectRange: (ids: number[]) => void;
+  /** 开始拖拽一行（ids = 参与移动的主机，供全局显示拖影提示） */
+  onDragStart?: (ids: number[]) => void;
+  /** 拖拽结束（无论是否放下） */
+  onDragEnd?: () => void;
   /** 表头全选/全不选（仅作用当前传入的 targets） */
   onToggleSelectAll: (selectAll: boolean) => void;
   historyLen: number;
@@ -116,6 +121,8 @@ const TargetTable: React.FC<TargetTableProps> = ({
   onRowClick,
   onToggleSelect,
   onSelectRange,
+  onDragStart,
+  onDragEnd,
   onToggleSelectAll,
   historyLen,
   unreadIds,
@@ -197,6 +204,19 @@ const TargetTable: React.FC<TargetTableProps> = ({
             return (
               <tr
                 key={t.id}
+                // 拖到侧边栏文件夹即可移动归属；拖的是「当前选中集合」
+                draggable
+                onDragStart={(e) => {
+                  const ids = dragMoveIds(t.id, selected);
+                  e.dataTransfer.setData(
+                    "application/x-pingboard-targets",
+                    JSON.stringify(ids)
+                  );
+                  e.dataTransfer.setData("text/plain", String(ids.length));
+                  e.dataTransfer.effectAllowed = "move";
+                  onDragStart?.(ids);
+                }}
+                onDragEnd={() => onDragEnd?.()}
                 onClick={(e) => {
                   // 行点击：Shift 连续选择也必须按**可见+排序后**的顺序取区间，
                   // 故在这里算好 ids 再交给 App（App 拿不到排序结果）。

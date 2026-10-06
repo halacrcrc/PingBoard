@@ -25,6 +25,8 @@ export interface FolderSidebarProps {
   /** 勾选全部（临时区 + 所有文件夹）—— 新语义下「不勾=不显示」，
    *  用户需要一个快捷方式一次性回到「看全部」 */
   onSelectAll: () => void;
+  /** 从主表拖拽 IP 放下：`folderId = null` 表示移回临时区 */
+  onDropTargets: (ids: number[], folderId: number | null) => void;
   onCreate: (name: string, color: string) => void;
   onRename: (id: number, name: string, color: string) => void;
   onDelete: (id: number) => void;
@@ -65,6 +67,7 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   onToggle,
   onClearAll,
   onSelectAll,
+  onDropTargets,
   onCreate,
   onRename,
   onDelete,
@@ -72,6 +75,8 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
 }) => {
   const [edit, setEdit] = React.useState<EditState | null>(null);
   const [askDelete, setAskDelete] = React.useState<FolderEntry | null>(null);
+  /** 当前被拖悬停的文件夹（用于高亮放置反馈） */
+  const [dropId, setDropId] = React.useState<number | null>(null);
 
   // 每次打开编辑框时初始化草稿（wasOpenRef 模式，避免依赖对象，见 R6）
   const wasOpenRef = React.useRef(false);
@@ -99,7 +104,8 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
   const allChecked = scope.size === 0;
   const allSelected = folders.length > 0 && scope.size >= folders.length;
   return (
-    <div className="w-48 max-[1199px]:w-36 shrink-0 flex flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+    // 宽度由外层容器控制（v1.2.1 起可拖动）；此处用 w-full 撑满容器
+    <div className="w-full flex flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
       <div className="px-2.5 h-9 flex items-center justify-between border-b border-slate-200 dark:border-slate-700 shrink-0">
         <span className="text-[12px] text-slate-500 dark:text-slate-400 whitespace-nowrap">范围</span>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -135,7 +141,34 @@ const FolderSidebar: React.FC<FolderSidebarProps> = ({
           return (
             <div
               key={f.folder.id}
-              className={`mx-1 px-1.5 py-1 rounded flex items-center gap-1.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 ${on ? "" : "opacity-60"}`}
+              // 拖拽放置目标：从主表把 IP 拖到这里即移动归属
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes("application/x-pingboard-targets")) return;
+                e.preventDefault(); // 必需，否则不会触发 drop
+                e.dataTransfer.dropEffect = "move";
+                setDropId(f.folder.id);
+              }}
+              onDragLeave={() => setDropId((d) => (d === f.folder.id ? null : d))}
+              onDrop={(e) => {
+                if (!e.dataTransfer.types.includes("application/x-pingboard-targets")) return;
+                e.preventDefault();
+                setDropId(null);
+                const raw = e.dataTransfer.getData("application/x-pingboard-targets");
+                let ids: number[] = [];
+                try {
+                  const parsed: unknown = JSON.parse(raw);
+                  if (Array.isArray(parsed)) {
+                    ids = parsed.filter((x): x is number => typeof x === "number");
+                  }
+                } catch {
+                  ids = []; // 解析失败绝不静默移动任何主机
+                }
+                // 临时区 id 0 在后端是「移出文件夹」(None)
+                onDropTargets(ids, f.folder.id === TEMP_AREA_ID ? null : f.folder.id);
+              }}
+              className={`mx-1 px-1.5 py-1 rounded flex items-center gap-1.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 ${on ? "" : "opacity-60"} ${
+                dropId === f.folder.id ? "ring-2 ring-sky-500 bg-sky-50 dark:bg-sky-950/40" : ""
+              }`}
               onClick={() => onToggle(f.folder.id)}
               title={on ? "点击取消勾选" : "点击勾选（筛选到此文件夹）"}
             >
