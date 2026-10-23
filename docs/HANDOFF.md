@@ -17,7 +17,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 |---|---|
 | 最新发布版本 | **v1.2.1**（tag `v1.2.1` → `4fa5ed2`，三包已发布到 GitHub Release） |
 | 当前开发版本 | 无 —— v1.2.1 已收尾，`main` 停在与 tag 之后一个文档提交 |
-| 当前 HEAD | 本地 `f46bc37` / 远程 `8cef7fa` —— **两者 tree 哈希相同**（内容逐字节一致），只是 commit 对象不同（远程那个由 GitHub API 创建）。见 §三 末尾说明 |
+| 当前 HEAD | **以 `git log -1` 为准**（本文不写死 SHA，否则每次提交后都失效）。🩸 本地与远程 **SHA 不同属正常** —— 远程 commit 由 GitHub API 创建，判断两侧是否一致**只看 tree 哈希**。见 §三 末尾说明 |
 | Rust 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **173 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
 | Tauri 命令数 | **24**（19 → 24，v1.1.10 新增 5 个文件夹命令；导出/添加接口仅加参数） |
 | 版本声明位置 | **五处**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。🩸 **`package-lock.json` 是 v1.1.9 时漏掉的第 5 处**，v1.1.10 已补；另需改 README |
