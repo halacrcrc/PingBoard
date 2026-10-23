@@ -549,9 +549,12 @@ export function dragHint(n: number, folderName: string): string {
  */
 export function windowTitle(base: string, version: string): string {
   const v = version.trim();
-  // 用**两个空格**与前面文字隔开：单个空格在标题栏里几乎贴着，
-  // 版本号会和标题文案糊成一句（观感上是「监视器 v1.2.1」而不是结尾的版本标记）。
-  return v ? `${base}  v${v}` : base;
+  // 用**三个全角空格**（U+3000，各 1em）与前面文字隔开，约等于 **3 个汉字宽**：
+  // 半角空格在标题栏里太窄（Segoe UI 9pt 下一个仅 ≈3px，两个才 ≈6px，不到半个汉字），
+  // 版本号会与标题文案糊成一句（观感上是「监视器 v1.3.0」而不是结尾的版本标记）。
+  // 不用「多个半角空格」凑宽度：宽度随字体变化、数不清，且在不同字体下比例不一致；
+  // U+3000 在中文字体里恒为 1em，留白稳定。
+  return v ? `${base}\u3000\u3000\u3000v${v}` : base;
 }
 
 /* ===================== 三区域宽度拖动 ===================== */
