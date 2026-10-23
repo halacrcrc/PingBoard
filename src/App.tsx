@@ -949,7 +949,10 @@ const App: React.FC = () => {
           savePaneWidth("pb-pane-sidebar", PANE_LIMITS.sidebar.initial);
         }}
       />
-        <div className="flex-1 min-w-0 border-r border-slate-200 dark:border-slate-700">
+        {/* ⚠️ 刻意**不加 border-r**：右侧紧挨可拖分隔条，边框与分隔条的 1px 线
+            会并排成两条竖线、中间还留一道空隙（用户反馈「这里有两条竖线还有空隙」）。
+            区域边界统一交给分隔条那条线表达，与侧边栏侧的既有做法一致。 */}
+        <div className="flex-1 min-w-0">
           {/* 三态：① 真的没主机 -> 欢迎页；② 未选范围 -> 引导勾选；
               ③ 正常 -> 主表。若不做 ②，新语义下「都不勾」会显示成
               「没有可监控的目标」，让人以为数据没了。 */}
