@@ -8,7 +8,7 @@
 > **普通用户权限即可运行**：探测走 Win32 IP Helper 的 ICMP API（`IcmpSendEcho`），
 > 不使用原始套接字（`SOCK_RAW`），因此**不需要管理员权限**，也不会触发 UAC。
 
-**当前版本 v1.2.1** 的四个关键词：**主机文件夹**、**统计持久化**、**拖拽归入**、**分区可调宽**。
+**当前版本 v1.3.0**：标题栏显示版本号 · 拖拽归入文件夹 · 三区域宽度可调 · 主机文件夹与统计持久化。
 
 ---
 
@@ -45,16 +45,16 @@
 
 | 安装包 | 体积 | 目标机缺 WebView2 时 | 适合场景 |
 |---|---|---|---|
-| `PingBoard_1.2.1_x64-setup.exe`（**在线引导版**，默认） | ≈ 2.1 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
-| `PingBoard_1.2.1_x64-setup-embedWebView2.exe`（**内置引导版**） | ≈ 3.7 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
-| `PingBoard_1.2.1_arm64-setup.exe`（**ARM64 实验版**） | ≈ 1.9 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
+| `PingBoard_1.3.0_x64-setup.exe`（**在线引导版**，默认，**本版已构建**） | ≈ 2.1 MB | 需联网，安装时自动下载引导程序 | 普通用户，机器可正常上网 |
+| `PingBoard_1.3.0_x64-setup-embedWebView2.exe`（**内置引导版**，需自建） | ≈ 3.9 MB | 需联网下载运行时（引导程序已内置） | 网络不稳，避免「下载引导程序」这一步失败 |
+| `PingBoard_1.3.0_arm64-setup.exe`（**ARM64 实验版**，需自建） | ≈ 1.9 MB | 同在线引导版 | Windows on ARM 设备要**原生**性能时 |
 
 > ⚠️ **ARM64 包未经真机测试**（开发机为 x64，无法运行 ARM64 程序验证；仅验证了编译通过与
 > PE 机器类型正确）。ARM64 Windows 设备**不装它也能用**：x64 包可通过 Windows 自带模拟运行。
 > 安装程序本体为 x86 属正常现象（ARM 机器靠系统模拟运行安装器，装出的应用才是原生 ARM64）。
 
-> v1.2.1 三种包随本版发布，发布后可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
-> 也可自行按本文档「构建」一节切换 `webviewInstallMode` 重新打包。
+> v1.3.0 本版仅构建 **x64 在线引导版**（上表第一行），另外两种包需自行按下文「构建」一节
+> 切换 `webviewInstallMode` 打包。发布后可在 [Releases](https://github.com/halacrcrc/PingBoard/releases/latest) 页下载。
 
 > 两者的差异仅在于打包方式（Tauri 的 `webviewInstallMode`）：
 > - 在线引导版 = `downloadBootstrapper`：安装时若检测到缺少 WebView2，才去下载约 1.8 MB 的引导程序；
@@ -67,6 +67,16 @@
 > WebView2 Evergreen，内置引导版已足以应对「目标机不能正常联网」的场景，218 MB 的体积与收益不成正比。
 > 旧设备用上面两个包即可；确需自建时方法见「构建」一节（保留备查，默认不构建）。
 
+本版已构建产物的校验值（**下载后建议核对**）：
+
+| 文件 | 大小 | SHA-256 |
+|---|---|---|
+| `PingBoard_1.3.0_x64-setup.exe` | 2,149,339 字节（≈ 2.05 MB） | `8C69A2B60DAC16410372F3424D2779A818656B45E4E3721AFE43B7CFC827153F` |
+
+```powershell
+Get-FileHash .\PingBoard_1.3.0_x64-setup.exe -Algorithm SHA256
+```
+
 ### 安装步骤
 
 1. 双击安装包，按向导完成（默认安装到 `%LOCALAPPDATA%\PingBoard`，当前用户，免 UAC）。
@@ -76,8 +86,8 @@
 静默安装 / 卸载（供批量部署使用）：
 
 ```bat
-PingBoard_1.2.1_x64-setup.exe /S                        :: 安装到默认目录
-PingBoard_1.2.1_x64-setup.exe /S /D=C:\Tools\PingBoard  :: /D= 必须是最后一个参数且用反斜杠
+PingBoard_1.3.0_x64-setup.exe /S                        :: 安装到默认目录
+PingBoard_1.3.0_x64-setup.exe /S /D=C:\Tools\PingBoard  :: /D= 必须是最后一个参数且用反斜杠
 uninstall.exe /S                                        :: 静默卸载
 ```
 
@@ -172,7 +182,7 @@ uninstall.exe /S                                        :: 静默卸载
   **事件日志**（条数显示、单主机「记录事件」开关、复制 / 导出 CSV / 清空，详见下文「事件日志」）。
 - 底部状态栏：运行状态、主机数、活跃线程数、总发包/收包/丢包率、运行时长、最后刷新时间。
 - 浅色 / 深色主题，选择持久化到 `localStorage`（默认浅色）。
-- **窗口标题栏显示当前版本号**（`PingBoard — 多主机 Ping 监视器 v1.2.1`）。
+- **窗口标题栏显示当前版本号**（`PingBoard — 多主机 Ping 监视器 v1.3.0`）。
   版本号在运行时从构建产物的包版本注入，**不在标题串里写死** —— 提版本后自动跟随。
 - 行着色约定：**绿 = 正常，红 = 失败**。
 - 状态文字配色：**「运行中」为绿色（`emerald-600`）**、**「已停止」为灰色（`slate-400`）**，
@@ -360,13 +370,13 @@ npm run build
 ```bash
 cd src-tauri
 cargo check
-cargo test --lib        # 179 项（v1.2.1）
+cargo test --lib        # 179 项（v1.3.0，实测 179 passed）
 ```
 
 ### 前端纯函数测试
 
 ```bash
-npm test                 # 173 项（v1.2.1）
+npm test                 # 174 项（v1.3.0，实测通过 174 / 失败 0）
 ```
 
 > 用 esbuild 把真实 TSX/TS 转译后加载，把 React / Tauri 等运行时打桩为空模块，
@@ -406,7 +416,7 @@ Remove-Item -LiteralPath "dist" -Recurse -Force
 npx tauri build --bundles nsis
 ```
 产物：
-- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.2.1_x64-setup.exe`
+- 安装包：`src-tauri/target/release/bundle/nsis/PingBoard_1.3.0_x64-setup.exe`
 - 可执行文件：`src-tauri/target/release/pingboard.exe`
 
 安装方式与系统要求见上文「[系统要求](#系统要求)」与「[安装](#安装)」两节：
@@ -459,10 +469,12 @@ pinginfo/
 │  ├─ app-icon-alt-white.svg/.png# 白底备选版
 │  ├─ screenshot.png             # 界面截图
 │  ├─ HANDOFF.md                 # 交接文档（接手时第一个读点）
+│  ├─ tech-assessment-brief.md   # 新功能技术评估包（交给外部模型做评估）
 │  ├─ code-review.md             # 代码审查标准：三级分级 + 红线
 │  ├─ folder-design.md           # 主机文件夹 + 统计持久化设计（含勾选语义定稿）
 │  ├─ events-log-design.md       # 事件日志设计稿
 │  ├─ export-filter-design.md    # 导出筛选设计（判定标准 / 字段表 / 兼容性）
+│  ├─ release-notes-1.3.0.md     # v1.3.0 与 v1.2.1 的完整差异
 │  ├─ release-notes-1.2.1.md     # v1.2.1 与 v1.2.0 的完整差异
 │  ├─ release-notes-1.2.0.md     # v1.2.0 与 v1.1.9 的完整差异
 │  └─ release-notes-1.1.9.md     # v1.1.9 与 v1.1.8 的完整差异
@@ -539,6 +551,7 @@ pinginfo/
 
 | 版本 | 亮点 |
 |---|---|
+| **v1.3.0** | 标题栏显示版本号 · 分隔条变细（1px 细线） |
 | **v1.2.1** | 拖拽归入文件夹 · 三区域宽度可调 · 跨文件夹允许相同 IP |
 | **v1.2.0** | 主机文件夹 · 统计持久化 · 清空列表只清临时区 |
 | **v1.1.9** | 配置韧性加固 · 报表导出按结果筛选 |

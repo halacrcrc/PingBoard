@@ -1,6 +1,6 @@
 # PingBoard 交接文档
 
-> 版本：v1.2.1 · 最后更新 2026-10-23 · 面向「新会话 / 新 agent 接手」
+> 版本：v1.3.0 · 最后更新 2026-10-24 · 面向「新会话 / 新 agent 接手」
 >
 > 本文是**接手时的第一个读点**，只交代状态与索引；细节一律引用专题文档，不在此重复。
 > 阅读顺序建议：§二 状态表 → §四 硬约束 → §五 待办 → 其余按需。
@@ -18,24 +18,25 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（**无组件库、无图表库**
 
 | 项 | 值 |
 |---|---|
-| 最新发布版本 | **v1.2.1**（tag `v1.2.1`，三包已发布到 GitHub Release） |
-| 当前开发版本 | 无 —— v1.2.1 已收尾，`main` 停在 tag 之后的文档提交上 |
+| 线上最新 Release | **v1.2.1**（GitHub Release 仍停在上一版，三包齐全） |
+| 当前版本 | **v1.3.0** —— 代码与文档已对齐、x64 在线引导包已构建，**待打 tag / 上传 Release** |
 | 当前 HEAD | **以 `git log -1` 为准**（本文不写死 SHA）。🩸 本地与远程 **SHA 不同属正常**，一致性**只看 tree 哈希**，见 §三 |
-| 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **173 passed / 0 failed**；`npx tsc --noEmit` = **0 error** |
+| 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **174 passed / 0 failed**；`npx tsc --noEmit` = **0 error** |
 | Tauri 命令数 | **24**（`commands.rs` 23 + `import.rs` 1；注册清单 `src-tauri/src/lib.rs`） |
 | 版本声明位置 | **五处**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。🩸 `package-lock.json` 是 v1.1.9 时漏掉的第 5 处；另需同步 README 安装包名 |
-| 代码规模 | 约 **13,900 行**：Rust **8,731 行 / 15 文件**（`state.rs` 2181、`model.rs` 1329、`events.rs` 1289）+ 前端 **5,184 行 / 18 文件**（`App.tsx` 1206、`format.ts` 602） |
-| 平台 | **Windows x64 为主，最低 Windows 10**；另发 ARM64 实验包（**未经真机测试**） |
+| 代码规模 | 约 **12,900 行**（`src-tauri/src/**/*.rs` 与 `src/**/*.ts{,x}` 实测）：Rust **7,997 行 / 15 文件**（`state.rs` 1994、`model.rs` 1246、`events.rs` 1178）+ 前端 **4,882 行 / 18 文件**（`App.tsx` 1135、`format.ts` 584） |
+| 平台 | **Windows x64 为主，最低 Windows 10**；ARM64 为历史实验包（**未经真机测试**，v1.3.0 未构建） |
 | 唯一外部运行时依赖 | WebView2 Evergreen Runtime（**不需要** VC++ 运行库 / .NET / `WebView2Loader.dll`） |
 | 🩸 本环境 cargo 限制 | 沙箱拦 rustup shim（`C:\Users\22534\.cargo\bin\cargo.exe`）。用工具链真 cargo：<br>`$env:PATH = "C:\Users\22534\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;" + $env:PATH`<br>（`node` / `npm` / `npx tsc` 不受影响） |
 
-**v1.2.1 三包**（以 GitHub Release 线上为准）：
+**v1.3.0 已构建包**（`src-tauri/target/release/bundle/nsis/`）：
 
-| 附件 | 体积 | 说明 |
-|---|---|---|
-| `PingBoard_1.2.1_x64-setup.exe` | 2,149,569 B | 在线引导（默认） |
-| `PingBoard_1.2.1_x64-setup-embedWebView2.exe` | 3,886,242 B | 内置引导 |
-| `PingBoard_1.2.1_arm64-setup.exe` | 1,949,651 B | ARM64 实验包 |
+| 附件 | 体积 | SHA-256 | 说明 |
+|---|---|---|---|
+| `PingBoard_1.3.0_x64-setup.exe` | 2,149,339 B | `8C69A2B60DAC16410372F3424D2779A818656B45E4E3721AFE43B7CFC827153F` | 在线引导（默认） |
+
+> 本版**只构建 x64 在线引导版**；内置引导版与 ARM64 实验包需自行切换 `webviewInstallMode` 打包。
+> 目录里残留的 `PingBoard_1.2.1_*.exe`（10-06）是上一版产物，**发布前别误传**。
 
 ---
 
@@ -74,8 +75,8 @@ API 创建的 commit 与本地 commit **内容相同但 SHA 不同**，看起来
 
 ### 3.3 基线 md5 与发版禁忌
 
-- `src-tauri/tauri.conf.json` **基线 md5 = `1abf882ed919f6a35cdc028e534184a5`（v1.2.1 起）**。
-  🩸 **提版本后基线必然变化，必须重记**（v1.1.8 的旧基线 `2c0a8cf0…` 已作废）。
+- `src-tauri/tauri.conf.json` **基线 md5 = `9377624eb871a28b58b3d99cb5196660`（v1.3.0 起）**。
+  🩸 **提版本后基线必然变化，必须重记**（v1.2.1 的旧基线 `1abf882e…`、v1.1.8 的 `2c0a8cf0…` 均已作废）。
 - 测 `webviewInstallMode` / `additionalBrowserArgs` 时，只改构建侧配置，**测完立刻还原并核对 md5**
   （`json.dump` 会重排格式，md5 必变）。
 - 🩸 `.gitignore` 必须排除 `交付包/` 与 `build-v1*/`：里面是 200 MB+ 的安装包，
@@ -123,7 +124,7 @@ R1 相关改动走**全量通道**（L1 自检 + L2 多轮至 🔴🟡 清零 + 
 **把修复回滚后依然全绿** —— 因为它测的是纯函数，而坏的是接线。
 修复方向：抽出 `decideAdd()` 决策纯函数，让测试打在真实决策点上。
 
-> 测试基建本身已补齐（`package.json` 有 `test` 脚本，`esbuild` 已声明为 devDependency，当前 173 项）。
+> 测试基建本身已补齐（`package.json` 有 `test` 脚本，`esbuild` 已声明为 devDependency，当前 174 项）。
 
 ---
 
@@ -140,6 +141,7 @@ R1 相关改动走**全量通道**（L1 自检 + L2 多轮至 🔴🟡 清零 + 
 | v1.2.0 A–D | 文件夹数据模型 / 状态与命令层 / 统计持久化 / 侧边栏与导出联动 | ✅ 已发布 |
 | v1.2.0 E–F | 清空列表只清临时区 + 添加/导入选文件夹 + 导出范围跟随侧边栏 | ✅ 已发布 |
 | v1.2.1 | 拖拽归入 + 右键通道 + 三区域宽度 + 判重限同文件夹 | ✅ 已发布 |
+| v1.3.0 | 标题栏显示版本号 + 分隔条细化（1px 线）+ 详情区双竖线修复 | ✅ 代码/文档完成，待发版 |
 | **批次 4** | 行为类 🟡（见 §5.1） | ⏳ **未开始** |
 
 ### 6.2 v1.2.x 期间修掉的 9 个用户可见缺陷（2026-10-05 ~ 10-06）
@@ -225,9 +227,11 @@ one-shot notice 会被竞争消费者吞掉，且发射器启动早于前端 mou
 | 文件 | 用途 |
 |---|---|
 | `code-review.md` | **审查的唯一裁决依据**：三级分级（🔴/🟡/💭）、红线 R1–R14、三通道、分语言清单、反模式、意见模板 |
+| `tech-assessment-brief.md` | **新功能技术评估包**（给外部模型的只读交接）：架构地图、24 命令契约、硬约束、改造面成本、评估输出模板 |
 | `folder-design.md` | **主机文件夹 + 统计持久化**（v1.2.0 设计定稿）：数据模型、侧边栏交互、不变量 C1–C3、勾选语义 |
 | `export-filter-design.md` | **报表导出筛选**：判定标准、15 列字段结构、兼容性保证、变异验证记录 |
 | `events-log-design.md` | 事件日志设计稿 |
+| `release-notes-1.3.0.md` | v1.3.0 与 v1.2.1 的逐条差异（标题栏版本号 / 分隔条细化 / 双竖线修复） |
 | `release-notes-1.2.1.md` | v1.2.1 与 v1.2.0 的逐条差异（拖拽 / 宽度 / 判重口径） |
 | `release-notes-1.2.0.md` | v1.2.0 与 v1.1.9 的逐条差异（文件夹 / 统计持久化 / 行为变更） |
 | `release-notes-1.1.9.md` | v1.1.9 与 v1.1.8 的逐条差异 |
@@ -266,8 +270,8 @@ one-shot notice 会被竞争消费者吞掉，且发射器启动早于前端 mou
 
 ## 十一、接手时建议的第一步
 
-1. `git log --oneline -5` + `git status`，确认工作区干净、基线是 v1.2.1 之后。
-2. 跑一遍基线：`cd src-tauri && PATH=<工具链bin>: $PATH cargo test --lib`（应 179 绿）、`npm test`（应 173 绿）、`npx tsc --noEmit`（应 0 error）。
+1. `git log --oneline -5` + `git status`，确认工作区干净、基线是 v1.3.0（tag `v1.2.1` 之后）。
+2. 跑一遍基线：`cd src-tauri && PATH=<工具链bin>: $PATH cargo test --lib`（应 179 绿）、`npm test`（应 174 绿）、`npx tsc --noEmit`（应 0 error）。
 3. 读 `.workbuddy/memory/MEMORY.md`（系统会自动注入主文件，**专题三份要自己读**）。
 4. 确认待办状态：只剩 §5.1 的批次 4 与 §5.2 的假测试。
 5. 动手前按 `docs/code-review.md` §4.1 过一遍提交前自检清单。
