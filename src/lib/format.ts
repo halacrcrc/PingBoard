@@ -549,7 +549,9 @@ export function dragHint(n: number, folderName: string): string {
  */
 export function windowTitle(base: string, version: string): string {
   const v = version.trim();
-  return v ? `${base} v${v}` : base;
+  // 用**两个空格**与前面文字隔开：单个空格在标题栏里几乎贴着，
+  // 版本号会和标题文案糊成一句（观感上是「监视器 v1.2.1」而不是结尾的版本标记）。
+  return v ? `${base}  v${v}` : base;
 }
 
 /* ===================== 三区域宽度拖动 ===================== */

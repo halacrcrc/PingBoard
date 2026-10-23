@@ -237,13 +237,18 @@ check("fmtDuration 分档（h/m/s）", () => {
 check("windowTitle：版本号来自参数（写死会红），空版本不留裸后缀", () => {
   eq(
     fmt.windowTitle("PingBoard — 多主机 Ping 监视器", "1.2.1"),
-    "PingBoard — 多主机 Ping 监视器 v1.2.1"
+    "PingBoard — 多主机 Ping 监视器  v1.2.1"
   );
   // 版本还没取到（异步未返回 / 取值失败）时，标题不能变成「…监视器 v」
   eq(fmt.windowTitle("PingBoard — 多主机 Ping 监视器", ""), "PingBoard — 多主机 Ping 监视器");
   eq(fmt.windowTitle("PingBoard — 多主机 Ping 监视器", "   "), "PingBoard — 多主机 Ping 监视器");
   // 运行中分支同样带版本，且台数不丢
-  eq(fmt.windowTitle("PingBoard — 运行中 (4 台)", "1.2.1"), "PingBoard — 运行中 (4 台) v1.2.1");
+  eq(fmt.windowTitle("PingBoard — 运行中 (4 台)", "1.2.1"), "PingBoard — 运行中 (4 台)  v1.2.1");
+  // 🩸 间隔必须是**两个空格**：单空格在标题栏里会与文案糊成一句
+  const t = fmt.windowTitle("监视器", "1.2.1");
+  if (!/\S {2}v1\.2\.1$/.test(t)) {
+    throw new Error(`版本号前应留两个空格，实际：${JSON.stringify(t)}`);
+  }
   // 🩸 防「版本号写死」：写死后不同入参会产出同一个标题，这条会抛错
   if (fmt.windowTitle("X", "1.2.1") === fmt.windowTitle("X", "9.9.9")) {
     throw new Error("版本号被写死了：不同版本产出了相同标题");
