@@ -535,6 +535,23 @@ export function dragHint(n: number, folderName: string): string {
   return n > 1 ? `将 ${n} 台主机移入「${name}」` : `将这台主机移入「${name}」`;
 }
 
+/* ===================== 窗口标题 ===================== */
+
+/**
+ * 窗口标题 = 基础部分 + 版本号后缀（版本为空时不加后缀，避免出现孤零零的 ` v`）。
+ *
+ * 🩸 版本号由调用方传入（`getVersion()`），**不写死**：写死后提版本时必漏这一处，
+ * 而且没有任何测试会红 —— 标题仍然「看起来正常」，只是永远停在旧号。
+ *
+ * ⚠️ 标题**统一由 `App.tsx` 那个 effect 设置**。后端 `setup` 里另设一份会被它覆盖
+ * （实测：setup 里设完立刻读是新标题，3 秒后 snapshot 到达又被改回不带版本号的）。
+ * 要改文案只改这一处。
+ */
+export function windowTitle(base: string, version: string): string {
+  const v = version.trim();
+  return v ? `${base} v${v}` : base;
+}
+
 /* ===================== 三区域宽度拖动 ===================== */
 
 /** 各区域宽度极限（px）。**默认值保持既有观感不变**，只在用户拖动后才生效。 */

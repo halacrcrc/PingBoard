@@ -234,6 +234,22 @@ check("fmtDuration 分档（h/m/s）", () => {
   eq(fmt.fmtDuration(3723000), "1h2m3s");
 });
 
+check("windowTitle：版本号来自参数（写死会红），空版本不留裸后缀", () => {
+  eq(
+    fmt.windowTitle("PingBoard — 多主机 Ping 监视器", "1.2.1"),
+    "PingBoard — 多主机 Ping 监视器 v1.2.1"
+  );
+  // 版本还没取到（异步未返回 / 取值失败）时，标题不能变成「…监视器 v」
+  eq(fmt.windowTitle("PingBoard — 多主机 Ping 监视器", ""), "PingBoard — 多主机 Ping 监视器");
+  eq(fmt.windowTitle("PingBoard — 多主机 Ping 监视器", "   "), "PingBoard — 多主机 Ping 监视器");
+  // 运行中分支同样带版本，且台数不丢
+  eq(fmt.windowTitle("PingBoard — 运行中 (4 台)", "1.2.1"), "PingBoard — 运行中 (4 台) v1.2.1");
+  // 🩸 防「版本号写死」：写死后不同入参会产出同一个标题，这条会抛错
+  if (fmt.windowTitle("X", "1.2.1") === fmt.windowTitle("X", "9.9.9")) {
+    throw new Error("版本号被写死了：不同版本产出了相同标题");
+  }
+});
+
 check("rttColorClass 分档（<50 绿 / <150 黄 / >=150 橙）", () => {
   if (!fmt.rttColorClass(49).includes("emerald")) throw new Error("49ms 应为绿色档");
   if (!fmt.rttColorClass(50).includes("yellow")) throw new Error("50ms 应为黄色档");

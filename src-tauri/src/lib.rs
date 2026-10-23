@@ -13,15 +13,6 @@ mod stats;
 
 use tauri::Manager;
 
-/// 窗口标题 = 基础标题 + 版本号。
-///
-/// 🩸 版本号的**唯一来源**是 `Cargo.toml`（提版本时与另外四处一起改），
-/// 标题串里**不再写死**版本号 —— 否则提版本后标题会一直停在旧号，
-/// 而这种「少改一处」的错误没有任何测试会红。
-pub fn window_title(version: &str) -> String {
-    format!("PingBoard — 多主机 Ping 监视器 v{version}")
-}
-
 pub fn run() {
     tauri::Builder::default()
         // 仅引入 dialog 插件（导出时选择保存路径）
@@ -54,12 +45,6 @@ pub fn run() {
             commands::move_targets,
         ])
         .setup(|app| {
-            // 0) 窗口标题追加版本号（版本取 Cargo.toml，标题里不再写死一处）
-            if let Some(win) = app.get_webview_window("main") {
-                let ver = app.package_info().version.to_string();
-                let _ = win.set_title(&window_title(&ver));
-            }
-
             let handle = app.handle().clone();
 
             // 1) 读取配置并初始化状态（失败不阻塞启动）
@@ -118,49 +103,4 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("PingBoard 启动失败");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::window_title;
-
-    /// 标题 = 基础标题 + 注入的版本号（版本号不得来自标题串内部）
-    #[test]
-    fn qa_window_title_carries_injected_version() {
-        assert_eq!(window_title("9.9.9"), "PingBoard — 多主机 Ping 监视器 v9.9.9");
-    }
-
-    /// 用**真实包版本**调用时，标题必须正好以它结尾 ——
-    /// 回滚成「标题里写死版本号」的写法时，提版本后这条会红。
-    #[test]
-    fn qa_window_title_uses_package_version_tail() {
-        let v = env!("CARGO_PKG_VERSION");
-        let t = window_title(v);
-        assert!(
-            t.ends_with(&format!("v{v}")),
-            "标题尾部应为当前包版本 v{v}，实际：{t}"
-        );
-        assert_eq!(
-            t.matches('v').count(),
-            1,
-            "标题里只应出现一个版本前缀，实际：{t}"
-        );
-    }
-
-    /// 🩸 接线哨兵：纯函数测试抓不到「setup 里忘了调用」——
-    /// 本项目已有 9 个「纯函数全绿但功能是坏的」先例，坏的正是 wiring。
-    /// 这里直接断言本文件确实把结果 set_title 到了 main 窗口。
-    #[test]
-    fn qa_window_title_is_wired_into_setup() {
-        let src = include_str!("lib.rs");
-        // 🩸 needle 必须用 concat! 拆开构造：若直接写字面量，本行会出现在 src 里，
-        // 断言就会「自指恒真」（第一次写这条时正是这么假绿的）。
-        let call = concat!("set_title(&window", "_title(&ver))");
-        assert!(
-            src.contains(call),
-            "setup 必须把 window_title 的结果 set_title 到窗口，否则标题不会变"
-        );
-        let win = concat!("get_webview_window(", "\"main\")");
-        assert!(src.contains(win), "必须作用于 main 窗口");
-    }
 }

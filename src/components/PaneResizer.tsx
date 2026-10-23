@@ -24,6 +24,10 @@ export interface PaneResizerProps {
 
 const PaneResizer: React.FC<PaneResizerProps> = ({ onResize, onReset, label }) => {
   const draggingRef = React.useRef<{ startX: number; last: number } | null>(null);
+  const [hovered, setHovered] = React.useState(false);
+  const [dragging, setDragging] = React.useState(false);
+  // 悬停或拖动中 → 线加粗并染色，提示「这里能拖」
+  const hot = hovered || dragging;
 
   // 用 window 监听而非元素自身：拖出分隔条范围后仍能继续跟随
   React.useEffect(() => {
@@ -43,6 +47,7 @@ const PaneResizer: React.FC<PaneResizerProps> = ({ onResize, onReset, label }) =
         draggingRef.current = null;
         document.body.style.cursor = "";
         document.body.style.userSelect = "";
+        setDragging(false);
       }
     };
     window.addEventListener("mousemove", onMove);
@@ -60,15 +65,22 @@ const PaneResizer: React.FC<PaneResizerProps> = ({ onResize, onReset, label }) =
       aria-label={label}
       tabIndex={0}
       title="拖动调整宽度（双击恢复默认；也可聚焦后用左右方向键）"
-      // 🩸 宽度 6px + 默认色 slate-300：此前 4px + slate-200 在浅色主题下
-      // 几乎不可见，用户根本不知道这里能拖（反馈为「功能没实现」）。
-      className="w-1.5 shrink-0 cursor-col-resize bg-slate-300 dark:bg-slate-600 hover:bg-sky-500 active:bg-sky-600 dark:hover:bg-sky-500"
+      // 🩸 热区仍是 6px（w-1.5），但**视觉线只有 1px** —— 此前整条 6px 都涂成
+      // slate-300，看上去像一块灰色挡板（用户反馈「太粗」）。
+      // 拆分后：布局宽度不变、可拖范围不变，只是「看起来细了」；
+      // 悬停 / 拖动时线加粗到 3px 并染成天蓝，避免又回到「看不出能拖」。
+      className="relative w-1.5 shrink-0 cursor-col-resize focus:outline-none"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setHovered(true)}
+      onBlur={() => setHovered(false)}
       onMouseDown={(e) => {
         e.preventDefault();
         draggingRef.current = {
           startX: e.clientX,
           last: e.clientX / currentZoomFactor(),
         };
+        setDragging(true);
         document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
       }}
@@ -83,7 +95,14 @@ const PaneResizer: React.FC<PaneResizerProps> = ({ onResize, onReset, label }) =
           onResize(step);
         }
       }}
-    />
+    >
+      <span
+        aria-hidden
+        className={`pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2 rounded-full transition-[width,background-color] duration-100 ${
+          hot ? "w-[3px] bg-sky-500" : "w-px bg-slate-400 dark:bg-slate-500"
+        }`}
+      />
+    </div>
   );
 };
 

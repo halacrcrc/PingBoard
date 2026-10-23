@@ -2,6 +2,7 @@
 import React from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { EventLevel, FolderEntry, LogEvent, PingSettings, Snapshot, TargetEntry } from "./types";
 import * as api from "./lib/api";
@@ -13,7 +14,7 @@ import {
   zoomStyle,
   type ExportFilter,
 } from "./lib/format";
-import { clampPaneWidth, currentZoomFactor, exportScopeIds, filterByFolderScope, folderCounts, loadPaneWidth, mergeSelection, PANE_LIMITS, savePaneWidth, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, withLiveCounts } from "./lib/format";
+import { clampPaneWidth, currentZoomFactor, exportScopeIds, filterByFolderScope, folderCounts, loadPaneWidth, mergeSelection, PANE_LIMITS, savePaneWidth, tempAreaCount, tempAreaIds, toggleScope, toggleSelection, windowTitle, withLiveCounts } from "./lib/format";
 
 import FolderSidebar from "./components/FolderSidebar";
 import { shouldIgnoreDeleteKey } from "./lib/keyboard";
@@ -373,17 +374,32 @@ const App: React.FC = () => {
 
   /* ------------------------- 窗口标题 ------------------------- */
 
+  // 版本号在运行期不变，取一次缓存到 state —— 让下面的标题 effect 保持同步计算，
+  // 避免「先渲染无版本、异步到了再改」的二次闪动。
+  const [appVersion, setAppVersion] = React.useState("");
+
   React.useEffect(() => {
-    const title = snapshot.running
+    getVersion()
+      .then(setAppVersion)
+      .catch((e) => {
+        // 取不到就退化成不带版本号的标题，不影响使用；但不能静默 ——
+        // 命令/API 改名时这里会静默变成「标题里永远没有版本号」。
+        console.error("[pingboard] 读取版本号失败：", e);
+      });
+  }, []);
+
+  React.useEffect(() => {
+    const base = snapshot.running
       ? `PingBoard — 运行中 (${snapshot.active_threads} 台)`
       : "PingBoard — 多主机 Ping 监视器";
+    const title = windowTitle(base, appVersion);
     document.title = title;
     getCurrentWindow()
       .setTitle(title)
       .catch(() => {
         /* 无权限时静默忽略 */
       });
-  }, [snapshot.running, snapshot.active_threads]);
+  }, [snapshot.running, snapshot.active_threads, appVersion]);
 
   /* ------------------------- 主选主机同步 / 历史回填 / 未读清零 ------------------------- */
 
