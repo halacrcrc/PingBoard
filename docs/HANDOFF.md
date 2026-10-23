@@ -17,7 +17,7 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 |---|---|
 | 最新发布版本 | **v1.2.1**（tag `v1.2.1` → `4fa5ed2`，三包已发布到 GitHub Release） |
 | 当前开发版本 | 无 —— v1.2.1 已收尾，`main` 停在与 tag 之后一个文档提交 |
-| 当前 HEAD | `fb10c1f`（`docs: 目录结构补入 CHANGELOG.md`），**本地仓库现在就在 `D:\pinginfo`**（见 §三） |
+| 当前 HEAD | 本地 `4dea3ae` / 远程 `3f6c494` —— **两者 tree 哈希相同**（内容逐字节一致），只是 commit 对象不同（远程那个由 GitHub API 创建）。见 §三 末尾说明 |
 | Rust 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **173 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
 | Tauri 命令数 | **24**（19 → 24，v1.1.10 新增 5 个文件夹命令；导出/添加接口仅加参数） |
 | 版本声明位置 | **五处**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。🩸 **`package-lock.json` 是 v1.1.9 时漏掉的第 5 处**，v1.1.10 已补；另需改 README |
@@ -49,7 +49,23 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 - ⚠️ `qa-artifacts/`（变异探针、校验脚本、Release 说明）已在 `.gitignore`，**不要**往里放需要入库的文档；长期保存的复审报告放 `docs/reviews/`。
 - ⚠️ 根目录若有 `build-v1*/`、`*-extract-*/`、`icon-work/`（约 290 MB 历史打包残留）已加入 `.gitignore`，确认无用后可整体删除腾空间。
 
-**若这台机器的工作区再次丢失**：`git clone https://github.com/halacrcrc/PingBoard.git` 即可完整恢复（`main` = `fb10c1f`，含全部 tag 与文档）；`node_modules` 与 `src-tauri/target` 需重新安装/编译。
+**若这台机器的工作区再次丢失**：`git clone https://github.com/halacrcrc/PingBoard.git` 即可完整恢复（含全部 tag 与文档）；`node_modules` 与 `src-tauri/target` 需重新安装/编译。
+
+### ⚠️ 本地 HEAD 与远程 SHA 不同是正常的
+
+本环境的 **git 传输层不稳定**（代理端口在、但 `push`/`fetch` 常报 `Recv failure: Connection was reset` 或超时），
+历次推送大量走的是 **GitHub API 兜底**（`qa-artifacts/push_via_api.mjs`）。API 创建的 commit 与本地
+commit **内容相同但 SHA 不同**，于是会出现「本地 `4dea3ae` / 远程 `3f6c494`」这种看似分叉的状态。
+
+**判断是否真的同步，看 tree 哈希而不是 commit SHA**：
+
+```
+本地：git rev-parse 'HEAD^{tree}'
+远程：GET /repos/halacrcrc/PingBoard/commits/main  ->  commit.tree.sha
+两者相同 = 文件内容逐字节一致（当前就是这种情况）
+```
+
+网络恢复后对齐方法：`git fetch origin && git reset origin/main`（工作区已一致，不会丢文件）。
 `交付包\` 里的 README 也要一并更新（三处同步：仓库 / D 盘 / 交付包）。
 
 🩸 **`.gitignore` 必须排除 `交付包/`**（2026-09-30 教训）。它**只存在于仓库侧**、不入库：
