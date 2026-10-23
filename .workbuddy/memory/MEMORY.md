@@ -53,14 +53,33 @@ Rust + Tauri 2 + React 18 + TS + Tailwind v3.4（无组件库/图表库，趋势
 - 🩸 **新增配置字段必须逐字段带 serde 默认值**，**枚举必须自定义 `deserialize_with`**（未知值降级、不报错）。
   否则旧配置整份反序列化失败 → **回落默认值、丢用户全部主机列表**。本项目最贵的教训。
 
-## 仓库与构建工作区分离
-- **git 仓库：`C:\Users\22534\WorkBuddy\pinginfo`**（有 `.git`/`LICENSE`/`docs/`/`交付包/`）。
-- **`D:\pinginfo` 只是构建工作区**（有 node_modules/target/dist，**没有 `.git`**）；改配置/构建在 D 盘，
-  文档改动三处同步（仓库 / D 盘 / `交付包/`）。
-- `tauri.conf.json` **基线 md5 = `1abf882ed919f6a35cdc028e534184a5`（v1.2.1 起，两侧须始终一致）**；提版本后须重记
-  （v1.1.8 时期旧基线 `2c0a8cf0fb8d8f1d5eebea6679c8d270` 已作废）。⚠️ 打包变体时只改**构建侧 D 盘**的
-  `webviewInstallMode`，构造完立刻还原（两侧 md5 必须一致）。
+## 仓库与工作区（2026-10-23 起已合并为一个位置）
+- 🩸 **旧的「双位置约定」已作废**：原仓库侧 `C:\Users\22534\WorkBuddy\pinginfo` **已被删除**
+  （`WorkBuddy` 下现只剩 `Claw`）。
+- **`D:\pinginfo` 现在是唯一工作区 + 唯一 git 仓库**。2026-10-23 就地恢复：
+  `git init` + `git remote add origin https://github.com/halacrcrc/PingBoard.git` + `git fetch` +
+  `git reset origin/main`（工作区文件未动），HEAD 对齐远程。
+- 提交推送直接在 `D:\pinginfo` 做：`git push origin main`。
+  **认证走 Windows 凭据管理器**（`.git/config` 里 URL 不含 token，已清理）。
+- `tauri.conf.json` **基线 md5 = `1abf882ed919f6a35cdc028e534184a5`（v1.2.1 起）**；提版本后须重记
+  （v1.1.8 旧基线 `2c0a8cf0…`、v1.2.0 旧基线 `7ca1829b…` 均已作废）。
+  ⚠️ 打包变体时只改 `webviewInstallMode`，构造完立刻还原并核对 md5 回到基线。
 
+## 🩸 测试有效性的边界（v1.2.0/v1.2.1 血的教训）
+一轮里修了 9 个用户可见缺陷，**没有一条能被纯函数测试抓到时** ——
+179 Rust + 173 前端测试全绿，功能却大面积不可用。失效点集中在三处：
+1. **后端 wiring**：`add_targets` 调 `TargetState::new`，而它硬编码 `folder_id: None`，
+   把前端传来的值吞了。（纯函数 `matches_filter` 等全对）
+2. **React state 连线**：`refreshFolders` 全项目只有 1 处调用；启动时压根没加载 folders；
+   `askDelete` + 确认框全实现了却没有入口；`??` 穿透导致删到 0 仍显示旧值。
+3. **DOM 事件链路**：原生 HTML5 拖放在 **WebView2 + `<table>` 下 `dragstart` 根本不触发**
+   （无拖影、无落点高亮）—— 已改为鼠标事件自实现。
+
+**规则**：改动涉及「后端命令的入参消费」「React 状态连线」「DOM 事件」时，
+纯函数测试**必须**配一次端到端实点。不要因为测试全绿就宣布功能完成。
+
+**另外**：抽纯函数时，测试必须 import **真实实现**，不能在测试文件里复刻副本 ——
+首版 `countOf` 是组件内局部函数，我在测试里抄了一份，变异真实代码后测试仍全绿，等于什么都没锁。
 ## 环境与本机坑
 - rustc 1.98.1 (msvc) · VS2022 + SDK 10.0.26100 · Node 22.22.2 · WebView2 153.x。
 - 技能已覆盖：`NO_PROXY='*'` 绕沙箱代理、清 `dist` 用 PowerShell、`indexmap` 的 `std` 特性、`--in-process-gpu`

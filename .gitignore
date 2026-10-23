@@ -7,6 +7,15 @@ src-tauri/gen/
 # Vite 配置加载临时文件
 vite.config.ts.timestamp-*.mjs
 
+# 历史构建产物与安装包解包目录（v1.1.x 时期遗留，共约 290 MB）
+# 这些只是一次性的打包/解包临时物，不入库；确认无用后可整个删掉腾空间。
+build-v1*/
+icon-work/
+*-extract/
+*-extract-*/
+v11*-extract*/
+*-extract-*.exe/
+
 # QA 临时探针产物（变异测试脚本、基线快照等），不入库
 qa-artifacts/
 qa-*.png
@@ -21,3 +30,10 @@ qa-*.png
 *.swp
 Thumbs.db
 Desktop.ini
+
+# CodeBuddy IDE 会话数据（非项目内容）
+.codebuddy/
+
+# 记忆文件的自动备份（正文在 .workbuddy/memory/，备份不入库）
+.workbuddy/backups/
+.workbuddy/codebuddy-feedback-*.md

@@ -21,7 +21,8 @@ export type ExportFormat = "csv" | "txt" | "html";
 export interface ExportDialogProps {
   open: boolean;
   onClose: () => void;
-  /** 全量目标（命中台数预览用；导出范围为「仅选中」时会在其上再按 id 过滤） */
+  /** **当前侧边栏范围内**的目标（v1.1.10 起不再是全量）。
+   *  「选中范围」= 它的全部；「仅勾选行」= 主表里勾中的那些。 */
   targets: TargetState[];
   /** 已选中的目标 id */
   selected: Set<number>;
@@ -42,8 +43,8 @@ export type ExportScope = "all" | "selected";
 
 /** 范围项定义（计数在渲染时算，故只存标签与取值） */
 const SCOPES: { id: ExportScope; label: string }[] = [
-  { id: "all", label: "全部节点" },
-  { id: "selected", label: "仅选中" },
+  { id: "all", label: "选中范围" },
+  { id: "selected", label: "仅勾选行" },
 ];
 
 /** 某范围项是否处于选中态（纯函数，供测试锁定「两项永不同色」） */

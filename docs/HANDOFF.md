@@ -1,6 +1,6 @@
 # PingBoard 交接文档
 
-> 版本：v1.2.1 · 最后更新 2026-10-06 · 面向「新会话 / 新 agent 接手」
+> 版本：v1.2.1 · 最后更新 2026-10-23 · 面向「新会话 / 新 agent 接手」
 > 本文是**接手时的第一个读点**，只做状态交代与索引。细节一律引用专题文档，不在此重复。
 
 ---
@@ -15,10 +15,10 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 
 | 项 | 值 |
 |---|---|
-| 最新发布版本 | **v1.2.0**（tag `v1.2.0`，三包已发布） |
-| 当前开发版本 | **v1.2.1** —— 拖拽归入文件夹 + 三区域宽度可调 |
-| 当前 HEAD（仓库侧） | 见 `git log -1`，工作区干净 |
-| Rust 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **130 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
+| 最新发布版本 | **v1.2.1**（tag `v1.2.1` → `4fa5ed2`，三包已发布到 GitHub Release） |
+| 当前开发版本 | 无 —— v1.2.1 已收尾，`main` 停在与 tag 之后一个文档提交 |
+| 当前 HEAD | `fb10c1f`（`docs: 目录结构补入 CHANGELOG.md`），**本地仓库现在就在 `D:\pinginfo`**（见 §三） |
+| Rust 测试 | `cargo test --lib` = **179 passed / 0 failed**；`npm test` = **173 passed / 0 failed**；`npx tsc --noEmit` = 0 error |
 | Tauri 命令数 | **24**（19 → 24，v1.1.10 新增 5 个文件夹命令；导出/添加接口仅加参数） |
 | 版本声明位置 | **五处**：`package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`。🩸 **`package-lock.json` 是 v1.1.9 时漏掉的第 5 处**，v1.1.10 已补；另需改 README |
 | 🩸 本环境 cargo 限制 | 沙箱拦 **rustup shim**（`C:\Users\22534\.cargo\bin\cargo.exe`）。改用工具链真 cargo：<br>`$env:PATH = "C:\Users\22534\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin;" + $env:PATH`<br>（`node`/`npm`/`npx tsc` 不受影响） |
@@ -26,23 +26,30 @@ Windows 多主机 ICMP Ping 监视器，对标 NirSoft PingInfoView。Rust + Tau
 | 唯一外部运行时依赖 | WebView2 Evergreen Runtime（**不需要** VC++ 运行库 / .NET / `WebView2Loader.dll`） |
 | 代码规模 | 约 9,300 行：Rust 11 模块（`state.rs` 1471、`events.rs` 1289 为最大） + 前端 15 文件（`App.tsx` 722） |
 
-**v1.1.8 三包**（`交付包/`，SHA256 见 `交付包/交付校验值-SHA256.txt`）：
-- `PingBoard_1.1.8_x64-setup.exe` — 在线引导，2,106,286 B
-- `PingBoard_1.1.8_x64-setup-embedWebView2.exe` — 内置引导，3,842,947 B
-- `PingBoard_1.1.8_arm64-setup.exe` — ARM64 实验包，1,912,620 B
+**v1.2.1 三包**（GitHub Release 附件，线上为准）：
+- `PingBoard_1.2.1_x64-setup.exe` — 在线引导，2,149,569 B
+- `PingBoard_1.2.1_x64-setup-embedWebView2.exe` — 内置引导，3,886,242 B
+- `PingBoard_1.2.1_arm64-setup.exe` — ARM64 实验包，1,949,651 B
 
 ---
 
-## 三、双位置约定（最容易踩的坑）
+## 三、⚠️ 工作目录（2026-10-23 起已变，与旧文档不同）
 
-| 位置 | 作用 | 有无 `.git` |
+**旧的「双位置约定」已作废。** 原仓库侧 `C:\Users\22534\WorkBuddy\pinginfo` **已被删除**（`WorkBuddy` 下现只剩 `Claw`），`D:\pinginfo` 原本没有 `.git`。
+
+2026-10-23 交接时已就地恢复：在 `D:\pinginfo` 执行 `git init` + `git remote add origin https://github.com/halacrcrc/PingBoard.git` + `git fetch` + `git reset origin/main`，**工作区文件未改动**，HEAD 已对齐远程 `fb10c1f`。
+
+| 位置 | 作用 | `.git` |
 |---|---|---|
-| `C:\Users\22534\WorkBuddy\pinginfo` | **唯一正式仓库**（源码 + `交付包\`，HTTPS 推送 github.com/halacrcrc/PingBoard） | ✅ |
-| `D:\pinginfo` | **构建工作区**（有 node_modules / target / dist，改配置、打包、跑构建都在这里） | ❌ |
+| `D:\pinginfo` | **唯一工作区 + 唯一仓库**（源码、node_modules、target、dist 都在这） | ✅ 已有 |
 
-**规则**：改代码/配置在 D 盘跑通后，源码与文档要同步回仓库侧；`docs/` 两侧都要有。
-⚠️ `qa-artifacts/` 是**临时产物目录**（变异探针、基线快照、截图），已在 `.gitignore` 中，**不要**往里放需要入库的文档。
-需要长期保存的复审报告放 `docs/reviews/`。
+**规则（已简化）**：
+- 不再需要「D 盘改完同步回 C 盘」——只有一个位置了。
+- 提交推送直接在 `D:\pinginfo` 做，`git push origin main` 即可（认证走 Windows 凭据管理器，URL 里**不含** token）。
+- ⚠️ `qa-artifacts/`（变异探针、校验脚本、Release 说明）已在 `.gitignore`，**不要**往里放需要入库的文档；长期保存的复审报告放 `docs/reviews/`。
+- ⚠️ 根目录若有 `build-v1*/`、`*-extract-*/`、`icon-work/`（约 290 MB 历史打包残留）已加入 `.gitignore`，确认无用后可整体删除腾空间。
+
+**若这台机器的工作区再次丢失**：`git clone https://github.com/halacrcrc/PingBoard.git` 即可完整恢复（`main` = `fb10c1f`，含全部 tag 与文档）；`node_modules` 与 `src-tauri/target` 需重新安装/编译。
 `交付包\` 里的 README 也要一并更新（三处同步：仓库 / D 盘 / 交付包）。
 
 🩸 **`.gitignore` 必须排除 `交付包/`**（2026-09-30 教训）。它**只存在于仓库侧**、不入库：
@@ -85,8 +92,29 @@ v1.1.8 **不需要回滚**，但 🔴 应在 **v1.1.9 全部清零**。
 | **批次 2b** | 🔴-1 `TargetConfig` 四字段容错 + settings 抢救 + 🔴-2 抢救可观测（跨端） | ✅ **已推送** `59f22d5`。复审 **0 🔴 / 3 🟡** |
 | **批次 2c** | 清 2b 的 4 条 🟡（字符串布尔语义 / toast 装不下路径 / `.catch` 静默吞错 / 提示分级） | ✅ **已推送** `59f22d5`。143 测试全绿，`tsc` 0 error |
 | 批次 3 | 测试基建 + 让测试真正能失败（`package.json` 加 test 脚本、`decideAdd()` / `compare()` / `consumeEvents()` 抽纯函数） | ✅ 已推送（前端测试 57→81） |
-| **批次 5（新）** | **报表导出筛选**：零丢包 / 全部未成功两种独立口径 | 🟢 **已落盘，前后端测试全绿**；待人工 QA + 发版（见 5.5） |
-| 批次 4 | 行为类 🟡（B1 事件被旁路消费 / B2 清空未清 pending / B3 幽灵 worker / B9 删目标不清事件等） | ⏳ 未开始 |
+| **批次 5** | **报表导出筛选**：零丢包 / 全部未成功两种独立口径 | ✅ 已随 v1.1.9 发布（见 5.5） |
+| **v1.2.0 批次 A–D** | 主机文件夹（数据模型/配置容错 → 状态层与命令层 → 统计持久化 → 前端侧边栏与导出联动） | ✅ 已发布 `v1.2.0` |
+| **v1.2.0 批次 E–F** | 清空列表只清临时区 + 添加/导入选文件夹 + 导出范围跟随侧边栏 | ✅ 已发布 |
+| **v1.2.1** | 拖拽 IP 归入文件夹 + 三区域宽度可拖动 + 判重改为限同文件夹 | ✅ 已发布 `v1.2.1` |
+| 批次 4 | 行为类 🟡（B1 事件被旁路消费 / B2 清空未清 pending / B3 幽灵 worker / B9 删目标不清事件等） | ⏳ **仍未开始**（唯一遗留） |
+
+### 5.6 v1.2.x 期间修掉的用户可见缺陷（2026-10-05 ~ 10-06）
+
+这一轮修了 9 个实际问题，**全部是「纯函数测试全绿但功能是坏的」**，记录在此以防重犯：
+
+| # | 现象 | 根因 |
+|---|---|---|
+| 1 | 添加主机选了文件夹却进临时区 | 后端 `add_targets` 调 `TargetState::new`，而它**硬编码 `folder_id: None`**，把前端传来的值吞了 |
+| 2 | 侧边栏「取消勾选」后反而只剩临时区 | 按钮写成 `folders.forEach(f => onToggle(f.id))`，**逐个 toggle** 会把没勾的勾上 |
+| 3 | 清空/删除 IP 后侧边栏台数不变 | 台数取自 `listFolders().count`，而它**只在增删文件夹时刷新**（全项目 `refreshFolders` 只有 1 处调用） |
+| 4 | 打开应用看不到文件夹 | 启动 effect 里**没有加载 folders**，`folders=[]` 且 `realFolderIds` 为空 → 台数全被当孤儿算进临时区 |
+| 5 | 删除文件夹功能不存在 | `askDelete` state + ConfirmDialog + `onDelete` **全部实现完毕，却没有任何入口调 `setAskDelete`** |
+| 6 | 冻结的台数：删到 0 仍显示 1 | `countOf` 写成 `counts?.get(id) ?? fallback.get(id) ?? 0`，**`??` 穿透**到滞后的 fallback |
+| 7 | 「归入」下拉显示旧台数 | 侧边栏改用了实时统计，但下拉仍直接渲染 `f.count`（只修了一个消费点，没做源头覆盖） |
+| 8 | 复选框勾一个会取消之前的 | 表头全选用 `new Set(filtered)` **替换**整个选中集合，清掉了范围外的选中 |
+| 9 | 拖 IP 到文件夹完全无反应 | 原生 HTML5 拖放在 **WebView2 + `<table>` 下 `dragstart` 根本不触发**；已改为鼠标事件自实现 |
+
+**共性教训**：这些缺陷**没有一条能被纯函数测试覆盖** —— 坏的是后端 wiring、React state 连线、DOM 事件链路。以后改动涉及这三处，**必须在纯函数之外做一次端到端实点**。
 
 ### 5.5 批次 5：报表导出筛选（2026-10-02，v1.1.9-dev）
 
